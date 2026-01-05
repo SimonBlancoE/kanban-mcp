@@ -251,6 +251,73 @@ header h1 {
   border-left: 4px solid transparent;
 }
 
+/* Card header with priority and dependencies */
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  gap: 0.5rem;
+}
+
+/* Priority badges */
+.priority {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+}
+
+.priority-critical {
+  background: #dc2626;
+  color: white;
+  animation: pulse-critical 1.5s infinite;
+}
+
+.priority-high {
+  background: #ea580c;
+  color: white;
+}
+
+.priority-medium {
+  background: #ca8a04;
+  color: white;
+}
+
+.priority-low {
+  background: #2563eb;
+  color: white;
+}
+
+@keyframes pulse-critical {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Dependency badges */
+.dependencies {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.dep-badge {
+  font-size: 0.65rem;
+  padding: 0.15rem 0.35rem;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.dep-badge.depends-on {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.dep-badge.blocks {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
 .column-backlog .task-card { border-left-color: var(--backlog-color); }
 .column-in-progress .task-card { border-left-color: var(--in-progress-color); }
 .column-blocked .task-card { border-left-color: var(--blocked-color); }

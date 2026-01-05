@@ -168,8 +168,29 @@ function createTaskCard(task) {
 
   const assigneeClass = task.assignee ? "" : "unassigned";
   const assigneeText = task.assignee || "Unassigned";
+  const priority = task.priority || "medium";
+  const priorityLabel = { critical: "CRIT", high: "HIGH", medium: "MED", low: "LOW" }[priority];
+
+  // Build dependency indicators
+  const dependsOnCount = (task.dependsOn || []).length;
+  const blocksCount = (task.blocks || []).length;
+  let dependencyHtml = "";
+  if (dependsOnCount > 0 || blocksCount > 0) {
+    dependencyHtml = `<div class="dependencies">`;
+    if (dependsOnCount > 0) {
+      dependencyHtml += `<span class="dep-badge depends-on" title="Depends on ${dependsOnCount} task(s)">⬅ ${dependsOnCount}</span>`;
+    }
+    if (blocksCount > 0) {
+      dependencyHtml += `<span class="dep-badge blocks" title="Blocks ${blocksCount} task(s)">➡ ${blocksCount}</span>`;
+    }
+    dependencyHtml += `</div>`;
+  }
 
   card.innerHTML = `
+    <div class="card-header">
+      <span class="priority priority-${priority}">${priorityLabel}</span>
+      ${dependencyHtml}
+    </div>
     <div class="title">${escapeHtml(task.title)}</div>
     <div class="assignee ${assigneeClass}">${escapeHtml(assigneeText)}</div>
     <div class="timestamp">${formatTime(task.updatedAt)}</div>
@@ -186,6 +207,36 @@ function createTaskCard(task) {
 function updateTaskCard(task) {
   const card = document.getElementById(`task-${task.id}`);
   if (!card) return;
+
+  // Update priority
+  const priorityEl = card.querySelector(".priority");
+  if (priorityEl) {
+    const priority = task.priority || "medium";
+    const priorityLabel = { critical: "CRIT", high: "HIGH", medium: "MED", low: "LOW" }[priority];
+    priorityEl.className = `priority priority-${priority}`;
+    priorityEl.textContent = priorityLabel;
+  }
+
+  // Update dependencies
+  const cardHeader = card.querySelector(".card-header");
+  if (cardHeader) {
+    const existingDeps = cardHeader.querySelector(".dependencies");
+    if (existingDeps) existingDeps.remove();
+
+    const dependsOnCount = (task.dependsOn || []).length;
+    const blocksCount = (task.blocks || []).length;
+    if (dependsOnCount > 0 || blocksCount > 0) {
+      const depsDiv = document.createElement("div");
+      depsDiv.className = "dependencies";
+      if (dependsOnCount > 0) {
+        depsDiv.innerHTML += `<span class="dep-badge depends-on" title="Depends on ${dependsOnCount} task(s)">⬅ ${dependsOnCount}</span>`;
+      }
+      if (blocksCount > 0) {
+        depsDiv.innerHTML += `<span class="dep-badge blocks" title="Blocks ${blocksCount} task(s)">➡ ${blocksCount}</span>`;
+      }
+      cardHeader.appendChild(depsDiv);
+    }
+  }
 
   const titleEl = card.querySelector(".title");
   const assigneeEl = card.querySelector(".assignee");

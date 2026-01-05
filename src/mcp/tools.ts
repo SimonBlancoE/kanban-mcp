@@ -3,7 +3,7 @@ import { z } from "zod";
 import { randomUUID } from "crypto";
 import { store } from "../store";
 import { broadcaster } from "../web/broadcast";
-import { ColumnSchema, RoleSchema, type Column, type Task } from "../types";
+import { ColumnSchema, RoleSchema, PrioritySchema, type Column, type Task } from "../types";
 
 /**
  * Helper para respuestas de error
@@ -121,17 +121,36 @@ export function registerTools(server: McpServer): void {
         .max(2000)
         .optional()
         .describe("Task description"),
+      priority: PrioritySchema.optional()
+        .default("medium")
+        .describe("Priority: critical, high, medium, low (default: medium)"),
       assignee: z.string().nullable().optional().describe("Assign to agent ID"),
       column: ColumnSchema.optional()
         .default("backlog")
         .describe("Initial column (default: backlog)"),
+      dependsOn: z
+        .array(z.string().uuid())
+        .optional()
+        .describe("Array of task IDs this task depends on"),
     },
-    async ({ title, description, assignee, column }) => {
+    async ({ title, description, priority, assignee, column, dependsOn }) => {
+      // Validate dependencies exist
+      if (dependsOn && dependsOn.length > 0) {
+        for (const depId of dependsOn) {
+          if (!store.getTask(depId)) {
+            return errorResponse(`Dependency task not found: ${depId}`);
+          }
+        }
+      }
+
       const now = new Date().toISOString();
       const task: Task = {
         id: randomUUID(),
         title,
         description: description ?? "",
+        priority: priority ?? "medium",
+        dependsOn: dependsOn ?? [],
+        blocks: [],
         assignee: assignee ?? null,
         column: column ?? "backlog",
         createdAt: now,
@@ -139,6 +158,18 @@ export function registerTools(server: McpServer): void {
       };
 
       store.addTask(task);
+
+      // Update blocks array of dependency tasks
+      if (dependsOn && dependsOn.length > 0) {
+        for (const depId of dependsOn) {
+          const depTask = store.getTask(depId);
+          if (depTask) {
+            depTask.blocks = [...(depTask.blocks || []), task.id];
+            depTask.updatedAt = now;
+          }
+        }
+      }
+
       await store.persist();
 
       // Notificar a los visores web
@@ -152,13 +183,13 @@ export function registerTools(server: McpServer): void {
   );
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // KANBAN_UPDATE_TASK - Actualizar título/descripción
+  // KANBAN_UPDATE_TASK - Actualizar título/descripción/prioridad
   // Architect: puede editar cualquier tarea
   // Agent: solo puede editar sus tareas asignadas
   // ═══════════════════════════════════════════════════════════════════════════
   server.tool(
     "kanban_update_task",
-    "Update a task's title or description. Agents can only update their own tasks.",
+    "Update a task's title, description, or priority. Agents can only update their own tasks.",
     {
       role: RoleSchema.describe("Your role: 'architect' or 'agent'"),
       agentId: z
@@ -168,8 +199,9 @@ export function registerTools(server: McpServer): void {
       taskId: z.string().uuid().describe("Task ID to update"),
       title: z.string().min(1).max(200).optional().describe("New title"),
       description: z.string().max(2000).optional().describe("New description"),
+      priority: PrioritySchema.optional().describe("New priority: critical, high, medium, low"),
     },
-    async ({ role, agentId, taskId, title, description }) => {
+    async ({ role, agentId, taskId, title, description, priority }) => {
       const task = store.getTask(taskId);
 
       if (!task) {
@@ -190,6 +222,7 @@ export function registerTools(server: McpServer): void {
       const updates: Partial<Task> = {};
       if (title !== undefined) updates.title = title;
       if (description !== undefined) updates.description = description;
+      if (priority !== undefined) updates.priority = priority;
 
       if (Object.keys(updates).length === 0) {
         return errorResponse("No updates provided");
@@ -344,13 +377,110 @@ export function registerTools(server: McpServer): void {
   // ═══════════════════════════════════════════════════════════════════════════
   server.tool(
     "kanban_get_stats",
-    "Get board statistics (task counts per column, total tasks, unassigned count).",
+    "Get board statistics including task counts, priority breakdown, and needsRefill alert.",
     {
       role: RoleSchema.describe("Your role: 'architect' or 'agent'"),
+      backlogThreshold: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .default(3)
+        .describe("Threshold for needsRefill alert (default: 3)"),
     },
-    async () => {
-      const stats = store.getStats();
+    async ({ backlogThreshold }) => {
+      const stats = store.getStats(backlogThreshold);
       return successResponse(stats);
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // KANBAN_ADD_DEPENDENCY - Añadir dependencia entre tareas (solo Architect)
+  // ═══════════════════════════════════════════════════════════════════════════
+  server.tool(
+    "kanban_add_dependency",
+    "Add a dependency between tasks (Architect only). Task A depends on Task B means A cannot start until B is done.",
+    {
+      role: z.literal("architect").describe("Must be 'architect'"),
+      taskId: z.string().uuid().describe("Task ID that will depend on another task"),
+      dependsOnTaskId: z.string().uuid().describe("Task ID that must be completed first"),
+    },
+    async ({ taskId, dependsOnTaskId }) => {
+      const error = store.addDependency(taskId, dependsOnTaskId);
+      if (error) {
+        return errorResponse(error);
+      }
+
+      await store.persist();
+
+      const task = store.getTask(taskId);
+      const dependsOnTask = store.getTask(dependsOnTaskId);
+
+      // Notificar a los visores web
+      broadcaster.broadcast("task_updated", task);
+      broadcaster.broadcast("task_updated", dependsOnTask);
+
+      return successResponse({
+        message: `Dependency added: "${task?.title}" now depends on "${dependsOnTask?.title}"`,
+        task,
+        dependsOnTask,
+      });
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // KANBAN_REMOVE_DEPENDENCY - Eliminar dependencia entre tareas (solo Architect)
+  // ═══════════════════════════════════════════════════════════════════════════
+  server.tool(
+    "kanban_remove_dependency",
+    "Remove a dependency between tasks (Architect only).",
+    {
+      role: z.literal("architect").describe("Must be 'architect'"),
+      taskId: z.string().uuid().describe("Task ID to remove dependency from"),
+      dependsOnTaskId: z.string().uuid().describe("Task ID to remove as dependency"),
+    },
+    async ({ taskId, dependsOnTaskId }) => {
+      const error = store.removeDependency(taskId, dependsOnTaskId);
+      if (error) {
+        return errorResponse(error);
+      }
+
+      await store.persist();
+
+      const task = store.getTask(taskId);
+      const dependsOnTask = store.getTask(dependsOnTaskId);
+
+      // Notificar a los visores web
+      broadcaster.broadcast("task_updated", task);
+      broadcaster.broadcast("task_updated", dependsOnTask);
+
+      return successResponse({
+        message: `Dependency removed: "${task?.title}" no longer depends on "${dependsOnTask?.title}"`,
+        task,
+        dependsOnTask,
+      });
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // KANBAN_HEALTH_CHECK - Análisis de salud del tablero
+  // ═══════════════════════════════════════════════════════════════════════════
+  server.tool(
+    "kanban_health_check",
+    "Analyze board health and detect issues like stale tasks, unassigned blocked tasks, low backlog, and overloaded agents.",
+    {
+      role: RoleSchema.describe("Your role: 'architect' or 'agent'"),
+      staleThresholdHours: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .default(24)
+        .describe("Hours before a task in progress is considered stale (default: 24)"),
+    },
+    async ({ staleThresholdHours }) => {
+      const health = store.getHealthCheck(staleThresholdHours);
+      return successResponse(health);
     }
   );
 }

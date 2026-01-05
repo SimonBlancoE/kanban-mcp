@@ -28,4 +28,7 @@ export async function startMcpServer(): Promise<void> {
   console.error("  - kanban_move_task");
   console.error("  - kanban_delete_task");
   console.error("  - kanban_get_stats");
+  console.error("  - kanban_add_dependency");
+  console.error("  - kanban_remove_dependency");
+  console.error("  - kanban_health_check");
 }

@@ -4,6 +4,18 @@ import { z } from "zod";
 export const ColumnSchema = z.enum(["backlog", "in_progress", "blocked", "done"]);
 export type Column = z.infer<typeof ColumnSchema>;
 
+// Priority enum - Niveles de prioridad
+export const PrioritySchema = z.enum(["low", "medium", "high", "critical"]);
+export type Priority = z.infer<typeof PrioritySchema>;
+
+// Nombres amigables para las prioridades (visor web)
+export const PRIORITY_LABELS: Record<Priority, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  critical: "Critical",
+};
+
 // Nombres amigables para las columnas (visor web)
 export const COLUMN_LABELS: Record<Column, string> = {
   backlog: "Backlog",
@@ -17,6 +29,9 @@ export const TaskSchema = z.object({
   id: z.string().uuid(),
   title: z.string().min(1).max(200),
   description: z.string().max(2000).default(""),
+  priority: PrioritySchema.default("medium"),
+  dependsOn: z.array(z.string().uuid()).default([]),
+  blocks: z.array(z.string().uuid()).default([]),
   assignee: z.string().min(1).max(100).nullable(),
   column: ColumnSchema,
   createdAt: z.string().datetime(),
@@ -45,6 +60,30 @@ export interface BoardStats {
   done: number;
   total: number;
   unassigned: number;
+  // Nuevas estadísticas
+  needsRefill: boolean;
+  backlogThreshold: number;
+  byPriority: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+}
+
+// Health check result
+export interface HealthCheck {
+  status: "healthy" | "warning" | "critical";
+  issues: HealthIssue[];
+  summary: string;
+}
+
+export interface HealthIssue {
+  type: "stale_task" | "unassigned_blocked" | "circular_dependency" | "low_backlog" | "overloaded_agent";
+  severity: "low" | "medium" | "high" | "critical";
+  message: string;
+  taskIds?: string[];
+  agentId?: string;
 }
 
 // WebSocket event types
