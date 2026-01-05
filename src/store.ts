@@ -1,9 +1,12 @@
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
+import { join, dirname } from "path";
 import type { Board, Task, Column, BoardStats } from "./types";
 
-const DATA_DIR = "./data";
-const DATA_PATH = `${DATA_DIR}/kanban.json`;
+// Resolver path absoluto al directorio data (relativo al módulo, no al cwd)
+const __dirname = dirname(import.meta.path);
+const DATA_DIR = join(__dirname, "..", "data");
+const DATA_PATH = join(DATA_DIR, "kanban.json");
 
 /**
  * KanbanStore - Capa de persistencia para el tablero Kanban
