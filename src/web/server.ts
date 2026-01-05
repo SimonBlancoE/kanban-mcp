@@ -1,8 +1,12 @@
 import { store } from "../store";
 import { broadcaster } from "./broadcast";
+import { join, dirname } from "path";
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3456;
-const PUBLIC_DIR = "./public";
+
+// Resolver path absoluto al directorio public (relativo al módulo, no al cwd)
+const __dirname = dirname(import.meta.path);
+const PUBLIC_DIR = join(__dirname, "..", "..", "public");
 
 // MIME types para archivos estáticos
 const MIME_TYPES: Record<string, string> = {
