@@ -2,72 +2,76 @@
 
 [![npm version](https://badge.fury.io/js/@simonblanco%2Fkanban-mcp.svg)](https://www.npmjs.com/package/@simonblanco/kanban-mcp)
 
-Un servidor MCP (Model Context Protocol) que proporciona un tablero Kanban para coordinación de agentes de IA, con un visor web en tiempo real para supervisión humana.
+An MCP (Model Context Protocol) server providing a Kanban board for AI agent coordination, with a real-time web viewer for human supervision.
 
-## Características
+## Features
 
-- **MCP Server**: 8 herramientas para gestión de tareas
-- **Roles**: Architect (control total) y Agent (tareas propias)
-- **4 columnas**: Backlog, In Progress, Blocked, Done
-- **Visor web**: Actualización en tiempo real via WebSocket
-- **Persistencia**: Archivo JSON automático
+- **MCP Server**: 14 tools for task management
+- **3 Roles**: Architect (full control), Agent (own tasks), QA (review & approve)
+- **4 Columns**: Backlog, In Progress, Blocked, Done
+- **Priorities**: Critical, High, Medium, Low
+- **Dependencies**: Task relationships with circular dependency detection
+- **QA Workflow**: Tasks require QA approval before completion
+- **Health Check**: Detect stale tasks, bottlenecks, and issues
+- **Web Viewer**: Real-time updates via WebSocket
+- **Persistence**: Automatic JSON file storage
 
 ---
 
-## Instalación
+## Installation
 
-### Requisitos
+### Requirements
 - [Bun](https://bun.sh) v1.0+
 
-### Opción 1: Via npm/npx (Recomendado)
+### Option 1: Via npm/npx (Recommended)
 
 ```bash
-# Añadir a Claude Code directamente
+# Add to Claude Code directly
 claude mcp add kanban -- bunx @simonblanco/kanban-mcp
 
-# O ejecutar manualmente
+# Or run manually
 bunx @simonblanco/kanban-mcp
 ```
 
-### Opción 2: Instalación global
+### Option 2: Global Installation
 
 ```bash
-# Instalar globalmente
+# Install globally
 bun add -g @simonblanco/kanban-mcp
 
-# Ejecutar
+# Run
 kanban-mcp
 ```
 
-### Opción 3: Desde el código fuente
+### Option 3: From Source
 
 ```bash
-# Clonar el repositorio
+# Clone the repository
 git clone https://github.com/SimonBlancoE/kanban-mcp
 cd kanban-mcp
 
-# Instalar dependencias
+# Install dependencies
 bun install
 
-# Iniciar el servidor
+# Start the server
 bun run src/index.ts
 ```
 
-El visor web estará disponible en: **http://localhost:3456**
+Web viewer available at: **http://localhost:3456**
 
 ---
 
-## Configurar en Claude Code
+## Configure in Claude Code
 
-### Método automático (recomendado)
+### Automatic Method (Recommended)
 
 ```bash
 claude mcp add kanban -- bunx @simonblanco/kanban-mcp
 ```
 
-### Método manual
+### Manual Method
 
-Añade a tu archivo de configuración MCP (`~/.config/claude/settings.json`):
+Add to your MCP configuration file (`~/.config/claude/settings.json`):
 
 ```json
 {
@@ -80,14 +84,14 @@ Añade a tu archivo de configuración MCP (`~/.config/claude/settings.json`):
 }
 ```
 
-**Alternativa (desde código fuente):**
+**Alternative (from source):**
 
 ```json
 {
   "mcpServers": {
     "kanban": {
       "command": "bun",
-      "args": ["run", "/ruta/completa/al/proyecto/src/index.ts"]
+      "args": ["run", "/full/path/to/project/src/index.ts"]
     }
   }
 }
@@ -95,66 +99,67 @@ Añade a tu archivo de configuración MCP (`~/.config/claude/settings.json`):
 
 ---
 
-## Onboarding en Proyectos Existentes
+## Onboarding Existing Projects
 
-Si quieres incorporar el Kanban a un proyecto que ya está en desarrollo, sigue este proceso:
+To incorporate the Kanban into a project already in development:
 
-### Paso 1: Sesión de análisis con el Architect
+### Step 1: Analysis Session with Architect
 
-Inicia una sesión con el Architect para que analice el proyecto y cree el backlog inicial:
+Start a session with the Architect to analyze the project and create the initial backlog:
 
 ```
-Eres el Architect de este proyecto. Tu primera tarea es analizar el estado
-actual y crear el backlog inicial en el Kanban.
+You are the Architect for this project. Your first task is to analyze the current
+state and create the initial backlog in the Kanban.
 
-Revisa:
-1. El código existente (estructura, qué está implementado)
-2. Issues/TODOs pendientes en el código
-3. README o documentación existente
-4. Cualquier archivo de planificación que exista
+Review:
+1. Existing code (structure, what's implemented)
+2. Pending issues/TODOs in the code
+3. README or existing documentation
+4. Any planning files that exist
 
-Luego usa las herramientas kanban_* para:
-- Crear tareas para el trabajo pendiente (en backlog)
-- Crear tareas para bugs conocidos (en backlog, con descripción clara)
-- Si hay trabajo "a medias", créalo en in_progress
-- Si hay bloqueos conocidos, documéntalos en blocked
+Then use the kanban_* tools to:
+- Create tasks for pending work (in backlog)
+- Create tasks for known bugs (in backlog, with clear description)
+- If there's work "in progress", create it in in_progress
+- If there are known blockers, document them in blocked
 
-Usa IDs de agentes genéricos por ahora: agent-alpha, agent-beta, agent-gamma.
-No asignes tareas aún, solo crea el backlog.
+Use generic agent IDs for now: agent-alpha, agent-beta, agent-gamma.
+Don't assign tasks yet, just create the backlog.
 ```
 
-### Paso 2: Revisión y asignación
+### Step 2: Review and Assignment
 
-Una vez el Architect ha creado el backlog:
+Once the Architect has created the backlog:
 
-1. **Revisa el tablero** en http://localhost:3456
-2. **Ajusta prioridades** si es necesario (el Architect puede reordenar)
-3. **Asigna tareas** a los agentes disponibles
+1. **Review the board** at http://localhost:3456
+2. **Adjust priorities** if needed (Architect can set priorities)
+3. **Assign tasks** to available agents
 
-### Paso 3: Trabajo con agentes
+### Step 3: Working with Agents
 
-**Opción A - Un agente a la vez:**
+**Option A - One agent at a time:**
 ```
-[Incluir instrucciones de Agent en system prompt]
+[Include Agent instructions in system prompt]
 
-Tu ID es "agent-alpha".
-Consulta el Kanban para ver qué tareas tienes asignadas.
-Toma la primera del backlog, muévela a in_progress, y trabaja en ella.
+Your ID is "agent-alpha".
+Check the Kanban to see what tasks are assigned to you.
+Take the first one from backlog, move it to in_progress, and work on it.
 ```
 
-**Opción B - Múltiples agentes en paralelo:**
-Cada agente en su propia sesión con su ID único. El Architect distribuye tareas y cada agente trabaja independientemente.
+**Option B - Multiple agents in parallel:**
+Each agent in its own session with a unique ID. The Architect distributes tasks and each agent works independently.
 
-### Flujo continuo
+### Continuous Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        ARCHITECT                             │
-│  - Analiza el proyecto                                      │
-│  - Crea tareas en backlog                                   │
-│  - Asigna a agentes disponibles                             │
-│  - Monitorea progreso y resuelve bloqueos                   │
-│  - Valida y cierra tareas completadas                       │
+│                        ARCHITECT                            │
+│  - Analyzes the project                                     │
+│  - Creates tasks in backlog with priorities                 │
+│  - Sets up task dependencies                                │
+│  - Assigns to available agents                              │
+│  - Monitors progress and resolves blockers                  │
+│  - Runs health checks to detect issues                      │
 └──────────────────────────┬──────────────────────────────────┘
                            │
            ┌───────────────┼───────────────┐
@@ -163,151 +168,278 @@ Cada agente en su propia sesión con su ID único. El Architect distribuye tarea
      │ Agent α  │    │ Agent β  │    │ Agent γ  │
      │ backlog→ │    │ backlog→ │    │ backlog→ │
      │ progress→│    │ progress→│    │ progress→│
-     │ done     │    │ blocked  │    │ done     │
+     │ done→QA  │    │ blocked  │    │ done→QA  │
      └──────────┘    └──────────┘    └──────────┘
+           │                               │
+           └───────────────┬───────────────┘
+                           ▼
+                    ┌──────────┐
+                    │    QA    │
+                    │ Reviews  │
+                    │ Approves │
+                    │ or Rejects│
+                    └──────────┘
 
               ┌──────────────────────────┐
-              │     SUPERVISOR (Tú)      │
+              │     SUPERVISOR (You)     │
               │  http://localhost:3456   │
-              │  Solo observa el estado  │
+              │   Observes board state   │
               └──────────────────────────┘
 ```
 
 ---
 
-## Herramientas MCP
+## MCP Tools
 
-| Herramienta | Architect | Agent | Descripción |
-|-------------|:---------:|:-----:|-------------|
-| `kanban_list_tasks` | ✅ todas | ✅ solo suyas | Listar tareas |
-| `kanban_get_task` | ✅ | ✅ solo suyas | Obtener detalle de tarea |
-| `kanban_create_task` | ✅ | ❌ | Crear nueva tarea |
-| `kanban_update_task` | ✅ | ✅ solo suyas | Editar título/descripción |
-| `kanban_assign_task` | ✅ | ❌ | Asignar/reasignar tarea |
-| `kanban_move_task` | ✅ | ✅ solo suyas | Mover entre columnas |
-| `kanban_delete_task` | ✅ | ❌ | Eliminar tarea |
-| `kanban_get_stats` | ✅ | ✅ | Estadísticas del tablero |
+### Task Management
+
+| Tool | Architect | Agent | QA | Description |
+|------|:---------:|:-----:|:--:|-------------|
+| `kanban_list_tasks` | all | own only | - | List tasks |
+| `kanban_get_task` | all | own only | - | Get task details |
+| `kanban_create_task` | ✅ | - | - | Create new task |
+| `kanban_update_task` | all | own only | - | Edit title/description/priority |
+| `kanban_assign_task` | ✅ | - | - | Assign/reassign task |
+| `kanban_move_task` | all | own only | - | Move between columns |
+| `kanban_delete_task` | ✅ | - | - | Delete task |
+
+### Dependencies
+
+| Tool | Architect | Agent | QA | Description |
+|------|:---------:|:-----:|:--:|-------------|
+| `kanban_add_dependency` | ✅ | - | - | Add dependency between tasks |
+| `kanban_remove_dependency` | ✅ | - | - | Remove dependency |
+
+### Statistics & Health
+
+| Tool | Architect | Agent | QA | Description |
+|------|:---------:|:-----:|:--:|-------------|
+| `kanban_get_stats` | ✅ | ✅ | ✅ | Board statistics with priority breakdown |
+| `kanban_health_check` | ✅ | ✅ | ✅ | Detect issues (stale tasks, bottlenecks) |
+
+### QA Workflow
+
+| Tool | Architect | Agent | QA | Description |
+|------|:---------:|:-----:|:--:|-------------|
+| `kanban_qa_list` | - | - | ✅ | List tasks pending QA review |
+| `kanban_qa_approve` | - | - | ✅ | Approve task completion |
+| `kanban_qa_reject` | - | - | ✅ | Reject with feedback |
 
 ---
 
-## Instrucciones para System Prompts
+## System Prompt Instructions
 
-### Para el ARCHITECT (Supervisor de Agentes)
+### For the ARCHITECT (Agent Supervisor)
 
-Copia esto en el system prompt del agente que actúe como Architect:
+Copy this to the system prompt for the agent acting as Architect:
 
 ```markdown
 ## Kanban Board Management
 
-Tienes acceso a un tablero Kanban compartido para coordinar el trabajo de múltiples agentes.
-Tu rol es **architect** - tienes control total sobre el tablero.
+You have access to a shared Kanban board for coordinating work across multiple agents.
+Your role is **architect** - you have full control over the board.
 
-### Columnas disponibles
-- `backlog`: Tareas pendientes de iniciar
-- `in_progress`: Tareas en desarrollo activo
-- `blocked`: Tareas bloqueadas por dependencias o problemas
-- `done`: Tareas completadas
+### Available Columns
+- `backlog`: Tasks pending start
+- `in_progress`: Tasks in active development
+- `blocked`: Tasks blocked by dependencies or issues
+- `done`: Completed tasks (pending or approved by QA)
 
-### Herramientas disponibles
+### Priority Levels
+- `critical`: Urgent, needs immediate attention
+- `high`: Important, should be done soon
+- `medium`: Normal priority (default)
+- `low`: Can wait, nice to have
 
-**Gestión de tareas:**
-- `kanban_create_task`: Crear tarea nueva
-  - Parámetros: `role: "architect"`, `title`, `description?`, `assignee?`, `column?`
-  - El `assignee` debe ser el ID del agente (ej: "agent-alpha", "agent-beta")
+### Available Tools
 
-- `kanban_update_task`: Editar título o descripción
-  - Parámetros: `role: "architect"`, `taskId`, `title?`, `description?`
+**Task Management:**
+- `kanban_create_task`: Create new task
+  - Parameters: `role: "architect"`, `title`, `description?`, `priority?`, `assignee?`, `column?`, `dependsOn?`
+  - The `assignee` must be the agent ID (e.g., "agent-alpha", "agent-beta")
+  - The `dependsOn` is an array of task UUIDs this task depends on
 
-- `kanban_assign_task`: Asignar tarea a un agente
-  - Parámetros: `role: "architect"`, `taskId`, `assignee` (o `null` para desasignar)
+- `kanban_update_task`: Edit title, description, or priority
+  - Parameters: `role: "architect"`, `taskId`, `title?`, `description?`, `priority?`
 
-- `kanban_move_task`: Cambiar columna de una tarea
-  - Parámetros: `role: "architect"`, `taskId`, `column`
+- `kanban_assign_task`: Assign task to an agent
+  - Parameters: `role: "architect"`, `taskId`, `assignee` (or `null` to unassign)
 
-- `kanban_delete_task`: Eliminar una tarea
-  - Parámetros: `role: "architect"`, `taskId`
+- `kanban_move_task`: Change task column
+  - Parameters: `role: "architect"`, `taskId`, `column`
+  - Note: Architect can move directly to done (bypasses QA)
 
-**Consultas:**
-- `kanban_list_tasks`: Ver todas las tareas
-  - Parámetros: `role: "architect"`, `column?` (filtro opcional)
+- `kanban_delete_task`: Delete a task
+  - Parameters: `role: "architect"`, `taskId`
 
-- `kanban_get_task`: Ver detalle de una tarea
-  - Parámetros: `role: "architect"`, `taskId`
+**Dependencies:**
+- `kanban_add_dependency`: Create dependency between tasks
+  - Parameters: `role: "architect"`, `taskId`, `dependsOnTaskId`
+  - Task A depends on Task B = A cannot start until B is done
 
-- `kanban_get_stats`: Ver estadísticas del tablero
-  - Parámetros: `role: "architect"`
+- `kanban_remove_dependency`: Remove a dependency
+  - Parameters: `role: "architect"`, `taskId`, `dependsOnTaskId`
 
-### Flujo de trabajo recomendado
+**Queries:**
+- `kanban_list_tasks`: View all tasks
+  - Parameters: `role: "architect"`, `column?` (optional filter)
 
-1. Al iniciar, consulta `kanban_get_stats` para ver el estado general
-2. Usa `kanban_list_tasks` para ver tareas pendientes o bloqueadas
-3. Crea tareas en `backlog` y asígnalas a agentes disponibles
-4. Monitorea el progreso y mueve tareas bloqueadas según sea necesario
-5. Cuando un agente reporta finalización, verifica y mueve a `done`
+- `kanban_get_task`: View task details
+  - Parameters: `role: "architect"`, `taskId`
 
-### Convención de IDs de agentes
-Usa IDs consistentes para los agentes: "agent-alpha", "agent-beta", "agent-gamma", etc.
+- `kanban_get_stats`: View board statistics
+  - Parameters: `role: "architect"`, `backlogThreshold?` (default: 3)
+  - Returns: counts per column, pendingQa, needsRefill flag, byPriority breakdown
+
+- `kanban_health_check`: Analyze board health
+  - Parameters: `role: "architect"`, `staleThresholdHours?` (default: 24)
+  - Detects: stale tasks, unassigned blocked, low backlog, overloaded agents, QA backlog
+
+### Recommended Workflow
+
+1. At start, run `kanban_get_stats` to see overall state
+2. Run `kanban_health_check` to detect any issues
+3. Use `kanban_list_tasks` to see pending or blocked tasks
+4. Create tasks in `backlog` with appropriate priority
+5. Set up dependencies between related tasks
+6. Assign tasks to available agents
+7. Monitor progress and resolve blockers as needed
+
+### Agent ID Convention
+Use consistent IDs for agents: "agent-alpha", "agent-beta", "agent-gamma", etc.
 ```
 
 ---
 
-### Para los AGENTS (Trabajadores)
+### For AGENTS (Workers)
 
-Copia esto en el system prompt de cada agente trabajador:
+Copy this to the system prompt for each worker agent:
 
 ```markdown
 ## Kanban Board - Agent Instructions
 
-Tienes acceso a un tablero Kanban compartido donde recibes y reportas tareas.
-Tu rol es **agent** con ID: `[REEMPLAZAR_CON_ID_DEL_AGENTE]`
+You have access to a shared Kanban board where you receive and report on tasks.
+Your role is **agent** with ID: `[REPLACE_WITH_AGENT_ID]`
 
-### Columnas del tablero
-- `backlog`: Tareas asignadas pendientes de iniciar
-- `in_progress`: Tareas en las que estás trabajando activamente
-- `blocked`: Tareas que no puedes continuar (indica el motivo)
-- `done`: Tareas que has completado
+### Board Columns
+- `backlog`: Assigned tasks pending start
+- `in_progress`: Tasks you're actively working on
+- `blocked`: Tasks you cannot continue (indicate the reason)
+- `done`: Tasks you've completed (will go to QA review)
 
-### Herramientas disponibles
+### Priority Levels (set by Architect)
+- `critical`: Do these first!
+- `high`: Important, prioritize
+- `medium`: Normal priority
+- `low`: Can wait
 
-**Ver tus tareas:**
-- `kanban_list_tasks`: Ver tareas asignadas a ti
-  - Parámetros: `role: "agent"`, `agentId: "[TU_ID]"`, `column?`
+### Available Tools
 
-- `kanban_get_task`: Ver detalle de una tarea tuya
-  - Parámetros: `role: "agent"`, `agentId: "[TU_ID]"`, `taskId`
+**View your tasks:**
+- `kanban_list_tasks`: View tasks assigned to you
+  - Parameters: `role: "agent"`, `agentId: "[YOUR_ID]"`, `column?`
 
-**Actualizar tus tareas:**
-- `kanban_move_task`: Cambiar estado de tu tarea
-  - Parámetros: `role: "agent"`, `agentId: "[TU_ID]"`, `taskId`, `column`
-  - Usa esto para indicar progreso: backlog → in_progress → done
-  - Si te bloqueas: mueve a `blocked`
+- `kanban_get_task`: View details of your task
+  - Parameters: `role: "agent"`, `agentId: "[YOUR_ID]"`, `taskId`
 
-- `kanban_update_task`: Actualizar descripción (para notas de progreso)
-  - Parámetros: `role: "agent"`, `agentId: "[TU_ID]"`, `taskId`, `description`
+**Update your tasks:**
+- `kanban_move_task`: Change task status
+  - Parameters: `role: "agent"`, `agentId: "[YOUR_ID]"`, `taskId`, `column`
+  - Use this to indicate progress: backlog → in_progress → done
+  - If blocked: move to `blocked`
+  - **Note**: Moving to `done` sends task to QA review
 
-**Estadísticas:**
-- `kanban_get_stats`: Ver resumen del tablero
-  - Parámetros: `role: "agent"`
+- `kanban_update_task`: Update description (for progress notes)
+  - Parameters: `role: "agent"`, `agentId: "[YOUR_ID]"`, `taskId`, `description?`, `priority?`
 
-### Flujo de trabajo
+**Statistics:**
+- `kanban_get_stats`: View board summary
+  - Parameters: `role: "agent"`
 
-1. **Al iniciar**: Consulta `kanban_list_tasks` con `column: "backlog"` para ver tareas pendientes
-2. **Al comenzar una tarea**: Muévela a `in_progress`
-3. **Durante el trabajo**: Actualiza la descripción con notas de progreso si es útil
-4. **Si te bloqueas**: Mueve a `blocked` y actualiza descripción explicando el problema
-5. **Al terminar**: Mueve a `done`
+### Workflow
 
-### Importante
-- Solo puedes ver y modificar tareas asignadas a ti
-- No puedes crear, eliminar ni reasignar tareas (solo el Architect)
-- Siempre incluye tu `agentId` en cada llamada
+1. **At start**: Run `kanban_list_tasks` with `column: "backlog"` to see pending tasks
+2. **Prioritize**: Look at task priorities - do `critical` and `high` first
+3. **Check dependencies**: Read task description for any dependencies
+4. **Start work**: Move task to `in_progress`
+5. **During work**: Update description with progress notes if useful
+6. **If blocked**: Move to `blocked` and update description explaining the problem
+7. **When done**: Move to `done` - task will be sent to QA for review
+8. **If QA rejects**: Task returns to `in_progress` with feedback - address the issues
+
+### Important
+- You can only view and modify tasks assigned to you
+- You cannot create, delete, or reassign tasks (only the Architect can)
+- Always include your `agentId` in every call
+- When you move to `done`, QA will review before final completion
+- Check `qaFeedback` field if a task was previously rejected
 ```
 
-**Nota**: Reemplaza `[TU_ID]` o `[REEMPLAZAR_CON_ID_DEL_AGENTE]` con el ID real del agente (ej: `agent-alpha`).
+**Note**: Replace `[YOUR_ID]` or `[REPLACE_WITH_AGENT_ID]` with the actual agent ID (e.g., `agent-alpha`).
 
 ---
 
-## Estructura del Proyecto
+### For QA (Quality Assurance)
+
+Copy this to the system prompt for the QA agent:
+
+```markdown
+## Kanban Board - QA Instructions
+
+You have access to a shared Kanban board where you review completed work.
+Your role is **qa** - you review tasks that agents have marked as done.
+
+### Your Responsibilities
+- Review tasks that agents have completed
+- Verify the implementation meets requirements
+- Approve tasks that pass review
+- Reject tasks that need more work (with constructive feedback)
+
+### Available Tools
+
+**View pending reviews:**
+- `kanban_qa_list`: List all tasks pending QA review
+  - Parameters: `role: "qa"`
+  - Returns: tasks with pendingQa: true
+
+**Review actions:**
+- `kanban_qa_approve`: Approve a task after review
+  - Parameters: `role: "qa"`, `taskId`, `notes?`
+  - Task is marked as truly done
+
+- `kanban_qa_reject`: Reject a task with feedback
+  - Parameters: `role: "qa"`, `taskId`, `feedback` (required, min 10 chars), `targetColumn?`
+  - Task returns to `in_progress` (default) or `blocked`
+  - Feedback is stored in `qaFeedback` field for the agent to see
+
+**Statistics:**
+- `kanban_get_stats`: View board summary including pendingQa count
+  - Parameters: `role: "qa"`
+
+### Workflow
+
+1. **Check queue**: Run `kanban_qa_list` to see tasks awaiting review
+2. **Review each task**:
+   - Read the task title and description
+   - Understand what was supposed to be done
+   - Verify the implementation (check code, test results, etc.)
+3. **Decision**:
+   - If satisfactory: `kanban_qa_approve` with optional notes
+   - If needs work: `kanban_qa_reject` with detailed feedback
+4. **Feedback quality**: When rejecting, be specific about:
+   - What's missing or incorrect
+   - What needs to be fixed
+   - How to verify the fix
+
+### Important
+- You can only review tasks, not create/assign/delete
+- Always provide constructive feedback when rejecting
+- The agent will see your feedback in the `qaFeedback` field
+```
+
+---
+
+## Project Structure
 
 ```
 claude-kanban-mcp/
@@ -315,115 +447,159 @@ claude-kanban-mcp/
 ├── tsconfig.json
 ├── README.md
 ├── data/
-│   └── kanban.json           # Datos persistidos (auto-generado)
+│   └── kanban.json           # Persisted data (auto-generated)
 ├── src/
 │   ├── index.ts              # Entry point
 │   ├── types.ts              # TypeScript interfaces + Zod schemas
-│   ├── store.ts              # Capa de persistencia
+│   ├── store.ts              # Persistence layer
 │   ├── mcp/
-│   │   ├── server.ts         # Configuración MCP
-│   │   └── tools.ts          # Definición de herramientas
+│   │   ├── server.ts         # MCP configuration
+│   │   └── tools.ts          # Tool definitions
 │   └── web/
 │       ├── server.ts         # HTTP + WebSocket server
 │       └── broadcast.ts      # WebSocket broadcasting
 └── public/
-    ├── index.html            # Visor Kanban
-    ├── styles.css            # Estilos
-    └── app.js                # Cliente WebSocket
+    ├── index.html            # Kanban viewer
+    ├── styles.css            # Styles
+    └── app.js                # WebSocket client
 ```
 
 ---
 
-## API REST (opcional)
+## REST API (Optional)
 
-El visor web expone endpoints REST para debugging:
+The web viewer exposes REST endpoints for debugging:
 
-- `GET /api/board` - Estado completo del tablero
-- `GET /api/stats` - Estadísticas
+- `GET /api/board` - Complete board state
+- `GET /api/stats` - Statistics
 
 ---
 
-## Configuración
+## Configuration
 
-### Puerto personalizado
+### Custom Port
 
 ```bash
 PORT=8080 bun run src/index.ts
 ```
 
-### Ubicación de datos
+### Data Location
 
-Los datos se guardan en `./data/kanban.json` relativo al directorio de ejecución.
-
----
-
-## Visor Web
-
-El visor es **pasivo** (solo lectura):
-- Muestra las 4 columnas con colores diferenciados
-- Actualización automática via WebSocket
-- Estadísticas en el header
-- Descripción de tareas visible al pasar el mouse
-
-Colores de columnas:
-- **Backlog**: Gris
-- **In Progress**: Azul
-- **Blocked**: Rojo
-- **Done**: Verde
+Data is saved in `./data/kanban.json` relative to the module directory.
 
 ---
 
-## Ejemplo de Uso
+## Web Viewer
 
-### Architect crea y asigna tareas:
+The viewer is **passive** (read-only):
+- Shows 4 columns with differentiated colors
+- Automatic updates via WebSocket
+- Statistics in header
+- Task description visible on hover
+- Priority badges (color-coded)
+- Dependency indicators
+- QA status badges (pending/approved/rejected)
+
+Column Colors:
+- **Backlog**: Gray
+- **In Progress**: Blue
+- **Blocked**: Red
+- **Done**: Green
+
+Priority Colors:
+- **Critical**: Red (pulsing)
+- **High**: Orange
+- **Medium**: Yellow
+- **Low**: Blue
+
+---
+
+## Usage Examples
+
+### Architect creates tasks with priority and dependencies:
 
 ```json
-// Crear tarea
+// Create high-priority task
 {
   "role": "architect",
-  "title": "Implementar autenticación OAuth",
-  "description": "Añadir login con Google y GitHub",
+  "title": "Implement OAuth authentication",
+  "description": "Add login with Google and GitHub",
+  "priority": "high",
   "assignee": "agent-alpha",
   "column": "backlog"
 }
 
-// Reasignar tarea
+// Create task with dependency
 {
   "role": "architect",
-  "taskId": "uuid-de-la-tarea",
-  "assignee": "agent-beta"
+  "title": "Add user profile page",
+  "description": "Display user info after login",
+  "priority": "medium",
+  "dependsOn": ["uuid-of-oauth-task"],
+  "column": "backlog"
+}
+
+// Add dependency between existing tasks
+{
+  "role": "architect",
+  "taskId": "uuid-of-profile-task",
+  "dependsOnTaskId": "uuid-of-oauth-task"
 }
 ```
 
-### Agent trabaja en su tarea:
+### Agent works on tasks:
 
 ```json
-// Ver mis tareas pendientes
+// View my pending tasks
 {
   "role": "agent",
   "agentId": "agent-alpha",
   "column": "backlog"
 }
 
-// Comenzar a trabajar
+// Start working
 {
   "role": "agent",
   "agentId": "agent-alpha",
-  "taskId": "uuid-de-la-tarea",
+  "taskId": "uuid-of-task",
   "column": "in_progress"
 }
 
-// Marcar como completada
+// Mark as complete (goes to QA)
 {
   "role": "agent",
   "agentId": "agent-alpha",
-  "taskId": "uuid-de-la-tarea",
+  "taskId": "uuid-of-task",
   "column": "done"
+}
+```
+
+### QA reviews and approves/rejects:
+
+```json
+// List pending reviews
+{
+  "role": "qa"
+}
+
+// Approve task
+{
+  "role": "qa",
+  "taskId": "uuid-of-task",
+  "notes": "Looks good, tests pass"
+}
+
+// Reject task with feedback
+{
+  "role": "qa",
+  "taskId": "uuid-of-task",
+  "feedback": "Missing error handling for invalid OAuth tokens. Please add try-catch and user-friendly error messages.",
+  "targetColumn": "in_progress"
 }
 ```
 
 ---
 
-## Licencia
+## License
 
 MIT
