@@ -1,0 +1,52 @@
+{
+  "name": "@simonblanco/kanban-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MCP Kanban board for AI agents coordination with real-time web viewer for human supervision",
+  "author": "Simon Blanco <simonblanco@proton.me>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SimonBlancoE/kanban-mcp"
+  },
+  "homepage": "https://github.com/SimonBlancoE/kanban-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/SimonBlancoE/kanban-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "kanban",
+    "ai-agents",
+    "claude",
+    "claude-code",
+    "task-management",
+    "multi-agent"
+  ],
+  "main": "src/index.ts",
+  "bin": {
+    "kanban-mcp": "./bin/kanban-mcp.js"
+  },
+  "files": [
+    "src",
+    "public",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0"
+  }
+}

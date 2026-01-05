@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Agent Kanban Board</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <!-- Header con estadísticas -->
+  <header>
+    <div class="header-left">
+      <h1>AI Agent Kanban</h1>
+      <div id="connection-status" class="status disconnected">
+        <span class="status-dot"></span>
+        <span class="status-text">Disconnected</span>
+      </div>
+    </div>
+
+    <div class="stats" id="stats">
+      <div class="stat stat-backlog">
+        <span class="stat-label">Backlog</span>
+        <span class="stat-value" id="stat-backlog">0</span>
+      </div>
+      <div class="stat stat-in-progress">
+        <span class="stat-label">In Progress</span>
+        <span class="stat-value" id="stat-in_progress">0</span>
+      </div>
+      <div class="stat stat-blocked">
+        <span class="stat-label">Blocked</span>
+        <span class="stat-value" id="stat-blocked">0</span>
+      </div>
+      <div class="stat stat-done">
+        <span class="stat-label">Done</span>
+        <span class="stat-value" id="stat-done">0</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Tablero Kanban -->
+  <main class="board">
+    <div class="column column-backlog" data-column="backlog">
+      <div class="column-header">
+        <h2>Backlog</h2>
+        <span class="column-count" id="count-backlog">0</span>
+      </div>
+      <div class="task-list" id="col-backlog"></div>
+    </div>
+
+    <div class="column column-in-progress" data-column="in_progress">
+      <div class="column-header">
+        <h2>In Progress</h2>
+        <span class="column-count" id="count-in_progress">0</span>
+      </div>
+      <div class="task-list" id="col-in_progress"></div>
+    </div>
+
+    <div class="column column-blocked" data-column="blocked">
+      <div class="column-header">
+        <h2>Blocked</h2>
+        <span class="column-count" id="count-blocked">0</span>
+      </div>
+      <div class="task-list" id="col-blocked"></div>
+    </div>
+
+    <div class="column column-done" data-column="done">
+      <div class="column-header">
+        <h2>Done</h2>
+        <span class="column-count" id="count-done">0</span>
+      </div>
+      <div class="task-list" id="col-done"></div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <span>Claude Kanban MCP</span>
+    <span class="separator">•</span>
+    <span id="last-update">Last update: --</span>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

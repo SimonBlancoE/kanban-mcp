@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Data (user-generated)
+data/
+
+# Lockfiles (bun)
+bun.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/
+
+# Build artifacts
+dist/
+*.tgz

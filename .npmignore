@@ -1,0 +1,30 @@
+# Development files
+.claude/
+.git/
+.gitignore
+node_modules/
+bun.lock
+
+# Data (users will generate their own)
+data/
+
+# Config files
+tsconfig.json
+.prettierrc
+.eslintrc*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+*.test.ts
+*.spec.ts
+__tests__/
+coverage/
