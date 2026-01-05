@@ -153,6 +153,8 @@ export function registerTools(server: McpServer): void {
         blocks: [],
         assignee: assignee ?? null,
         column: column ?? "backlog",
+        pendingQa: false,
+        qaFeedback: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -283,12 +285,14 @@ export function registerTools(server: McpServer): void {
   // KANBAN_MOVE_TASK - Mover tarea entre columnas
   // Architect: puede mover cualquier tarea
   // Agent: solo puede mover sus tareas asignadas
+  // QA: no puede usar esta herramienta (debe usar qa_approve/qa_reject)
+  // NOTA: Cuando un agent mueve a "done", la tarea queda pendiente de QA
   // ═══════════════════════════════════════════════════════════════════════════
   server.tool(
     "kanban_move_task",
-    "Move a task to a different column. Agents can only move their own tasks.",
+    "Move a task to a different column. Agents can only move their own tasks. When agents move to 'done', task goes to QA review first.",
     {
-      role: RoleSchema.describe("Your role: 'architect' or 'agent'"),
+      role: z.enum(["architect", "agent"]).describe("Your role: 'architect' or 'agent' (QA uses qa_approve/qa_reject)"),
       agentId: z
         .string()
         .optional()
@@ -321,7 +325,40 @@ export function registerTools(server: McpServer): void {
         return errorResponse(`Task is already in column '${column}'`);
       }
 
-      const updatedTask = store.updateTask(taskId, { column });
+      // INTERCEPT: When agent moves to "done", mark as pending QA instead
+      if (role === "agent" && column === "done") {
+        const updatedTask = store.updateTask(taskId, {
+          column: "done",
+          pendingQa: true,
+          qaFeedback: null,
+        });
+        await store.persist();
+
+        broadcaster.broadcast("task_moved", {
+          task: updatedTask,
+          fromColumn,
+          toColumn: "done",
+        });
+
+        return successResponse({
+          message: `Task marked for completion and sent to QA review`,
+          pendingQa: true,
+          task: updatedTask,
+        });
+      }
+
+      // Architect moving to done clears pendingQa
+      const updates: Partial<Task> = { column };
+      if (role === "architect" && column === "done") {
+        updates.pendingQa = false;
+        updates.qaFeedback = null;
+      }
+      // Moving out of done clears pendingQa
+      if (fromColumn === "done") {
+        updates.pendingQa = false;
+      }
+
+      const updatedTask = store.updateTask(taskId, updates);
       await store.persist();
 
       // Notificar a los visores web con información de movimiento
@@ -481,6 +518,132 @@ export function registerTools(server: McpServer): void {
     async ({ staleThresholdHours }) => {
       const health = store.getHealthCheck(staleThresholdHours);
       return successResponse(health);
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // QA WORKFLOW TOOLS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // KANBAN_QA_LIST - Listar tareas pendientes de QA
+  // ═══════════════════════════════════════════════════════════════════════════
+  server.tool(
+    "kanban_qa_list",
+    "List all tasks pending QA review (QA role only).",
+    {
+      role: z.literal("qa").describe("Must be 'qa'"),
+    },
+    async () => {
+      const tasks = store.getTasks().filter(t => t.pendingQa);
+      return successResponse({
+        count: tasks.length,
+        tasks: tasks.map(t => ({
+          id: t.id,
+          title: t.title,
+          description: t.description,
+          priority: t.priority,
+          assignee: t.assignee,
+          updatedAt: t.updatedAt,
+        })),
+      });
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // KANBAN_QA_APPROVE - Aprobar tarea y completarla
+  // ═══════════════════════════════════════════════════════════════════════════
+  server.tool(
+    "kanban_qa_approve",
+    "Approve a task after QA review, marking it as truly done (QA role only).",
+    {
+      role: z.literal("qa").describe("Must be 'qa'"),
+      taskId: z.string().uuid().describe("Task ID to approve"),
+      notes: z
+        .string()
+        .max(500)
+        .optional()
+        .describe("Optional approval notes"),
+    },
+    async ({ taskId, notes }) => {
+      const task = store.getTask(taskId);
+
+      if (!task) {
+        return errorResponse(`Task not found: ${taskId}`);
+      }
+
+      if (!task.pendingQa) {
+        return errorResponse("Task is not pending QA review");
+      }
+
+      if (task.column !== "done") {
+        return errorResponse("Task must be in 'done' column to approve");
+      }
+
+      const updatedTask = store.updateTask(taskId, {
+        pendingQa: false,
+        qaFeedback: notes ? `APPROVED: ${notes}` : "APPROVED",
+      });
+      await store.persist();
+
+      broadcaster.broadcast("task_updated", updatedTask);
+
+      return successResponse({
+        message: "Task approved and marked as complete",
+        task: updatedTask,
+      });
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // KANBAN_QA_REJECT - Rechazar tarea y devolverla al agente
+  // ═══════════════════════════════════════════════════════════════════════════
+  server.tool(
+    "kanban_qa_reject",
+    "Reject a task after QA review, returning it to in_progress with feedback (QA role only).",
+    {
+      role: z.literal("qa").describe("Must be 'qa'"),
+      taskId: z.string().uuid().describe("Task ID to reject"),
+      feedback: z
+        .string()
+        .min(10)
+        .max(2000)
+        .describe("Required feedback explaining why the task was rejected and what needs to be fixed"),
+      targetColumn: z
+        .enum(["in_progress", "blocked"])
+        .optional()
+        .default("in_progress")
+        .describe("Where to return the task (default: in_progress)"),
+    },
+    async ({ taskId, feedback, targetColumn }) => {
+      const task = store.getTask(taskId);
+
+      if (!task) {
+        return errorResponse(`Task not found: ${taskId}`);
+      }
+
+      if (!task.pendingQa) {
+        return errorResponse("Task is not pending QA review");
+      }
+
+      const fromColumn = task.column;
+      const updatedTask = store.updateTask(taskId, {
+        column: targetColumn ?? "in_progress",
+        pendingQa: false,
+        qaFeedback: `REJECTED: ${feedback}`,
+      });
+      await store.persist();
+
+      broadcaster.broadcast("task_moved", {
+        task: updatedTask,
+        fromColumn,
+        toColumn: targetColumn ?? "in_progress",
+      });
+
+      return successResponse({
+        message: `Task rejected and returned to '${targetColumn ?? "in_progress"}' with feedback`,
+        task: updatedTask,
+      });
     }
   );
 }

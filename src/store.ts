@@ -123,9 +123,10 @@ class KanbanStore {
       backlog: backlogCount,
       in_progress: tasks.filter((t) => t.column === "in_progress").length,
       blocked: tasks.filter((t) => t.column === "blocked").length,
-      done: tasks.filter((t) => t.column === "done").length,
+      done: tasks.filter((t) => t.column === "done" && !t.pendingQa).length,
       total: tasks.length,
       unassigned: tasks.filter((t) => !t.assignee).length,
+      pendingQa: tasks.filter((t) => t.pendingQa).length,
       needsRefill: backlogCount < backlogThreshold,
       backlogThreshold,
       byPriority: {
@@ -280,6 +281,17 @@ class KanbanStore {
         severity: "critical",
         message: `${criticalNotStarted.length} critical priority task(s) not yet started`,
         taskIds: criticalNotStarted.map(t => t.id),
+      });
+    }
+
+    // Check for pending QA backlog
+    const pendingQaTasks = tasks.filter(t => t.pendingQa);
+    if (pendingQaTasks.length > 3) {
+      issues.push({
+        type: "pending_qa_backlog",
+        severity: pendingQaTasks.length > 5 ? "high" : "medium",
+        message: `${pendingQaTasks.length} task(s) waiting for QA review`,
+        taskIds: pendingQaTasks.map(t => t.id),
       });
     }
 

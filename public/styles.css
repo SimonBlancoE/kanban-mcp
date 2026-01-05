@@ -318,6 +318,44 @@ header h1 {
   color: #22c55e;
 }
 
+/* QA badges */
+.qa-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 0.15rem 0.35rem;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.qa-badge.pending {
+  background: #f59e0b;
+  color: #000;
+  animation: pulse-qa 1.5s infinite;
+}
+
+.qa-badge.approved {
+  background: rgba(34, 197, 94, 0.3);
+  color: #22c55e;
+}
+
+.qa-badge.rejected {
+  background: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+
+@keyframes pulse-qa {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Pending QA card styling */
+.task-card.pending-qa {
+  border: 2px dashed #f59e0b;
+  border-left-width: 4px;
+  border-left-style: solid;
+}
+
 .column-backlog .task-card { border-left-color: var(--backlog-color); }
 .column-in-progress .task-card { border-left-color: var(--in-progress-color); }
 .column-blocked .task-card { border-left-color: var(--blocked-color); }

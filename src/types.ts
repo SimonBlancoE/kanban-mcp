@@ -34,6 +34,9 @@ export const TaskSchema = z.object({
   blocks: z.array(z.string().uuid()).default([]),
   assignee: z.string().min(1).max(100).nullable(),
   column: ColumnSchema,
+  // QA workflow fields
+  pendingQa: z.boolean().default(false),
+  qaFeedback: z.string().max(2000).nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -49,7 +52,10 @@ export const BoardSchema = z.object({
 export type Board = z.infer<typeof BoardSchema>;
 
 // Role types - Roles para autorización
-export const RoleSchema = z.enum(["architect", "agent"]);
+// - architect: full control
+// - agent: can only see/modify own tasks
+// - qa: can review and approve/reject tasks pending QA
+export const RoleSchema = z.enum(["architect", "agent", "qa"]);
 export type Role = z.infer<typeof RoleSchema>;
 
 // Estadísticas del tablero
@@ -60,6 +66,7 @@ export interface BoardStats {
   done: number;
   total: number;
   unassigned: number;
+  pendingQa: number;
   // Nuevas estadísticas
   needsRefill: boolean;
   backlogThreshold: number;
@@ -79,7 +86,7 @@ export interface HealthCheck {
 }
 
 export interface HealthIssue {
-  type: "stale_task" | "unassigned_blocked" | "circular_dependency" | "low_backlog" | "overloaded_agent";
+  type: "stale_task" | "unassigned_blocked" | "circular_dependency" | "low_backlog" | "overloaded_agent" | "pending_qa_backlog";
   severity: "low" | "medium" | "high" | "critical";
   message: string;
   taskIds?: string[];

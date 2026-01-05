@@ -163,7 +163,7 @@ function renderTask(task) {
 
 function createTaskCard(task) {
   const card = document.createElement("div");
-  card.className = "task-card";
+  card.className = `task-card${task.pendingQa ? " pending-qa" : ""}`;
   card.id = `task-${task.id}`;
 
   const assigneeClass = task.assignee ? "" : "unassigned";
@@ -186,9 +186,17 @@ function createTaskCard(task) {
     dependencyHtml += `</div>`;
   }
 
+  // QA status indicator
+  const qaStatusHtml = task.pendingQa
+    ? `<span class="qa-badge pending" title="Awaiting QA review">QA</span>`
+    : task.qaFeedback
+      ? `<span class="qa-badge ${task.qaFeedback.startsWith("APPROVED") ? "approved" : "rejected"}" title="${escapeHtml(task.qaFeedback)}">${task.qaFeedback.startsWith("APPROVED") ? "✓" : "✗"}</span>`
+      : "";
+
   card.innerHTML = `
     <div class="card-header">
       <span class="priority priority-${priority}">${priorityLabel}</span>
+      ${qaStatusHtml}
       ${dependencyHtml}
     </div>
     <div class="title">${escapeHtml(task.title)}</div>
@@ -208,6 +216,9 @@ function updateTaskCard(task) {
   const card = document.getElementById(`task-${task.id}`);
   if (!card) return;
 
+  // Update card class for pending QA
+  card.className = `task-card${task.pendingQa ? " pending-qa" : ""}`;
+
   // Update priority
   const priorityEl = card.querySelector(".priority");
   if (priorityEl) {
@@ -217,9 +228,27 @@ function updateTaskCard(task) {
     priorityEl.textContent = priorityLabel;
   }
 
-  // Update dependencies
+  // Update QA badge
   const cardHeader = card.querySelector(".card-header");
   if (cardHeader) {
+    const existingQa = cardHeader.querySelector(".qa-badge");
+    if (existingQa) existingQa.remove();
+
+    if (task.pendingQa) {
+      const qaBadge = document.createElement("span");
+      qaBadge.className = "qa-badge pending";
+      qaBadge.title = "Awaiting QA review";
+      qaBadge.textContent = "QA";
+      cardHeader.insertBefore(qaBadge, cardHeader.querySelector(".dependencies"));
+    } else if (task.qaFeedback) {
+      const qaBadge = document.createElement("span");
+      qaBadge.className = `qa-badge ${task.qaFeedback.startsWith("APPROVED") ? "approved" : "rejected"}`;
+      qaBadge.title = task.qaFeedback;
+      qaBadge.textContent = task.qaFeedback.startsWith("APPROVED") ? "✓" : "✗";
+      cardHeader.insertBefore(qaBadge, cardHeader.querySelector(".dependencies"));
+    }
+
+    // Update dependencies
     const existingDeps = cardHeader.querySelector(".dependencies");
     if (existingDeps) existingDeps.remove();
 

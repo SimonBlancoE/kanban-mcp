@@ -31,4 +31,7 @@ export async function startMcpServer(): Promise<void> {
   console.error("  - kanban_add_dependency");
   console.error("  - kanban_remove_dependency");
   console.error("  - kanban_health_check");
+  console.error("  - kanban_qa_list (QA only)");
+  console.error("  - kanban_qa_approve (QA only)");
+  console.error("  - kanban_qa_reject (QA only)");
 }
