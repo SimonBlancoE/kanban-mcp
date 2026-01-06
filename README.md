@@ -29,7 +29,8 @@ claude mcp add kanban -- bunx @simonblanco/kanban-mcp
 ```bash
 # Clone and symlink skills for workflow commands
 git clone https://github.com/SimonBlancoE/kanban-mcp
-ln -s $(pwd)/kanban-mcp/.claude/skills/Kanban ~/.claude/skills/Kanban
+cd kanban-mcp/.claude/skills
+for skill in kanban-*; do ln -s "$(pwd)/$skill" ~/.claude/skills/; done
 ```
 
 ### Step 3: Start Working
@@ -287,7 +288,12 @@ PORT=8080 bun run src/index.ts
 
 ```
 claude-kanban-mcp/
-├── .claude/skills/Kanban/     # Workflow skills
+├── .claude/skills/            # Workflow skills
+│   ├── kanban-architect/
+│   ├── kanban-agent/
+│   ├── kanban-qa/
+│   ├── kanban-sprint/
+│   └── kanban-review-loop/
 ├── src/
 │   ├── index.ts               # Entry point
 │   ├── store.ts               # Persistence layer
