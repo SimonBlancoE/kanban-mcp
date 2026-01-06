@@ -17,8 +17,9 @@ bun.lock
 .DS_Store
 Thumbs.db
 
-# Claude Code
-.claude/
+# Claude Code (exclude cache, include skills)
+.claude/*
+!.claude/skills/
 
 # Build artifacts
 dist/

@@ -446,6 +446,16 @@ claude-kanban-mcp/
 ├── package.json
 ├── tsconfig.json
 ├── README.md
+├── .claude/
+│   └── skills/
+│       └── Kanban/           # Workflow skills
+│           ├── SKILL.md
+│           └── Workflows/
+│               ├── Architect.md
+│               ├── Agent.md
+│               ├── QA.md
+│               ├── Sprint.md
+│               └── ReviewLoop.md
 ├── data/
 │   └── kanban.json           # Persisted data (auto-generated)
 ├── src/
@@ -597,6 +607,81 @@ Priority Colors:
   "targetColumn": "in_progress"
 }
 ```
+
+---
+
+## Workflow Skills
+
+The package includes Claude Code skills for workflow orchestration.
+
+### Installation
+
+Symlink the skills directory to your Claude Code skills folder:
+
+```bash
+# From the kanban-mcp directory (after cloning or installing)
+ln -s $(pwd)/.claude/skills/Kanban ~/.claude/skills/Kanban
+```
+
+Or if installed globally via npm:
+
+```bash
+ln -s $(npm root -g)/@simonblanco/kanban-mcp/.claude/skills/Kanban ~/.claude/skills/Kanban
+```
+
+### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `/kanban-architect` | Plan work, assign tasks, monitor progress |
+| `/kanban-agent <id>` | Execute assigned tasks as an agent |
+| `/kanban-qa` | Review completed work, approve or reject |
+| `/kanban-sprint [task]` | Full dev cycle with auto-spawned agents |
+| `/kanban-review-loop` | Start continuous health monitoring daemon |
+
+### Role Commands
+
+**Architect** - Full control over the board:
+```
+/kanban-architect
+```
+Plans tasks, sets priorities, assigns to agents, monitors progress.
+
+**Agent** - Execute assigned work:
+```
+/kanban-agent agent-alpha
+```
+Works on assigned tasks, moves through workflow, submits to QA.
+
+**QA** - Review completed tasks:
+```
+/kanban-qa
+```
+Reviews pending tasks, approves or rejects with feedback.
+
+### Orchestration Commands
+
+**Sprint** - Full development cycle:
+```
+/kanban-sprint "implement user authentication"
+```
+Automatically spawns:
+1. Architect to plan and assign tasks
+2. Parallel Agents to execute work
+3. QA to review completed tasks
+4. Loops until all tasks approved
+
+**Review Loop** - Continuous monitoring:
+```
+/kanban-review-loop
+```
+Background daemon that:
+- Checks board health every 5 minutes
+- Auto-spawns QA if backlog grows > 3
+- Alerts on stale or blocked tasks
+- Suggests planning when backlog is low
+
+Stop with `/kanban-review-loop stop` or kill the background task.
 
 ---
 
