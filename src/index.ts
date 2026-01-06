@@ -14,6 +14,7 @@
  */
 
 import { store } from "./store";
+import { learningStore } from "./learning";
 import { startMcpServer } from "./mcp/server";
 import { startWebServer } from "./web/server";
 
@@ -21,12 +22,13 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3456;
 
 async function main(): Promise<void> {
   console.error("╔═══════════════════════════════════════════════════════════╗");
-  console.error("║           CLAUDE KANBAN MCP - AI Agent Board              ║");
+  console.error("║     CLAUDE KANBAN MCP - AI Agent Board + Ralph Wiggum    ║");
   console.error("╚═══════════════════════════════════════════════════════════╝");
   console.error("");
 
   // 1. Cargar datos persistidos
   await store.load();
+  await learningStore.load();
 
   // 2. Iniciar servidor web (HTTP + WebSocket para el visor)
   startWebServer();

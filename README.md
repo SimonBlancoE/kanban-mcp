@@ -2,7 +2,7 @@
 
 [![npm version](https://badge.fury.io/js/@simonblanco%2Fkanban-mcp.svg)](https://www.npmjs.com/package/@simonblanco/kanban-mcp)
 
-A Kanban board MCP server for AI agent coordination, with real-time web viewer for human supervision.
+A Kanban board MCP server for AI agent coordination with **Ralph Wiggum iterative refinement**, real-time web viewer, and 3-tier learning system.
 
 ---
 
@@ -37,40 +37,45 @@ for skill in kanban-*; do ln -s "$(pwd)/$skill" ~/.claude/skills/; done
 
 ```
 /kanban-architect                    # Plan and assign tasks
-/kanban-sprint "implement feature"   # Full automated dev cycle
+/kanban-sprint "implement feature"   # Full automated dev cycle with iteration
 ```
 
-### Workflow Overview
+---
+
+## Ralph Wiggum Pattern
+
+This project implements the **Ralph Wiggum technique** - an iterative refinement pattern for AI agents:
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                      ARCHITECT                                │
-│  /kanban-architect                                            │
-│  Plans → Prioritizes → Assigns → Monitors                     │
-└──────────────────────────┬───────────────────────────────────┘
-                           │
-           ┌───────────────┼───────────────┐
-           ▼               ▼               ▼
-     ┌──────────┐    ┌──────────┐    ┌──────────┐
-     │ Agent α  │    │ Agent β  │    │ Agent γ  │
-     │ Executes │    │ Executes │    │ Executes │
-     │ Tasks    │    │ Tasks    │    │ Tasks    │
-     └────┬─────┘    └────┬─────┘    └────┬─────┘
-          └───────────────┼───────────────┘
-                          ▼
-                   ┌──────────┐
-                   │    QA    │
-                   │ Reviews  │
-                   │ Approves │
-                   └──────────┘
-                          │
-         ┌────────────────┴────────────────┐
-         ▼                                 ▼
-    [Approved]                      [Rejected]
-       Done                    Back to Agent + Feedback
+┌─────────────────────────────────────────────────────────────────┐
+│                    SPRINT (Ralph Wiggum Loop)                   │
+│                                                                 │
+│   ┌──────────┐    ┌──────────┐    ┌──────────┐                 │
+│   │ PLANNING │───►│ EXECUTING│───►│ REVIEWING│                 │
+│   │          │    │          │    │          │                 │
+│   │ Architect│    │  Agents  │    │    QA    │                 │
+│   │ + Criteria│   │ + Iterate│    │ + Learn  │                 │
+│   └──────────┘    └────┬─────┘    └────┬─────┘                 │
+│                        │               │                        │
+│                        │    ┌──────────┴──────────┐            │
+│                        │    ▼                     ▼            │
+│                        │ [Approved]          [Rejected]        │
+│                        │    │              + Feedback          │
+│                        │    ▼              + Category          │
+│                        │  DONE             + Severity          │
+│                        │                       │               │
+│                        └───────────────────────┘               │
+│                          Loop until approved                   │
+│                          or maxIterations                      │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-**Watch progress:** Open http://localhost:3456 for real-time board visualization.
+**Key concepts:**
+- **Acceptance Criteria**: Each task has clear success conditions
+- **Iteration Tracking**: Agents start/submit iterations with work summaries
+- **Structured Feedback**: QA provides categorized feedback (logic, testing, security, etc.)
+- **Learning System**: Patterns from rejections become project-wide lessons
+- **Max Iterations**: Tasks escalate if they exceed iteration limits
 
 ---
 
@@ -82,10 +87,13 @@ for skill in kanban-*; do ln -s "$(pwd)/$skill" ~/.claude/skills/; done
 | **4 Columns** | Backlog, In Progress, Blocked, Done |
 | **4 Priorities** | Critical, High, Medium, Low |
 | **Dependencies** | Task relationships with circular detection |
-| **QA Workflow** | Tasks require approval before completion |
-| **Health Check** | Detect stale tasks, bottlenecks, overloaded agents |
-| **Web Viewer** | Real-time updates via WebSocket |
-| **14 MCP Tools** | Full task management API |
+| **QA Workflow** | Tasks require approval with structured feedback |
+| **Sprints** | Goal-driven work packages with success criteria |
+| **Iteration Tracking** | Ralph Wiggum pattern with max iterations |
+| **3-Tier Learning** | Task → Agent → Project knowledge accumulation |
+| **Health Check** | Detect stale tasks, bottlenecks, escalations |
+| **Interactive Dashboard** | Click tasks for detail modal, live activity feed |
+| **27 MCP Tools** | Full task, sprint, iteration, and learning API |
 
 ---
 
@@ -93,11 +101,11 @@ for skill in kanban-*; do ln -s "$(pwd)/$skill" ~/.claude/skills/; done
 
 | Command | Description |
 |---------|-------------|
-| `/kanban-architect` | Plan work, assign tasks, monitor progress |
-| `/kanban-agent <id>` | Execute assigned tasks (e.g., `agent-alpha`) |
-| `/kanban-qa` | Review completed work, approve or reject |
-| `/kanban-sprint [task]` | Full dev cycle with auto-spawned agents |
-| `/kanban-review-loop` | Background health monitoring daemon |
+| `/kanban-architect` | Plan work, set acceptance criteria, create sprints |
+| `/kanban-agent <id>` | Execute tasks with iteration pattern (e.g., `agent-alpha`) |
+| `/kanban-qa` | Review work with categorized feedback |
+| `/kanban-sprint [task]` | Full Ralph Wiggum dev cycle |
+| `/kanban-review-loop` | Background monitoring with escalation alerts |
 
 ### Sprint (Automated Dev Cycle)
 
@@ -105,15 +113,17 @@ for skill in kanban-*; do ln -s "$(pwd)/$skill" ~/.claude/skills/; done
 /kanban-sprint "implement user authentication"
 ```
 
-Automatically spawns Architect → parallel Agents → QA, loops until all tasks approved.
+Creates sprint with success criteria → Spawns Architect to plan tasks with acceptance criteria → Parallel Agents iterate until done → QA reviews with structured feedback → Loops until approved or maxIterations.
 
-### Review Loop (Continuous Monitoring)
+### Agent Iteration Workflow
 
 ```
-/kanban-review-loop
+1. kanban_start_iteration      # Begin work, track iteration number
+2. [Do the work]               # Implement against acceptance criteria
+3. kanban_submit_iteration     # Submit with work summary
+4. [QA Reviews]                # Approve or reject with feedback
+5. If rejected → Start new iteration with feedback context
 ```
-
-Background daemon: checks health every 5 minutes, auto-spawns QA if backlog grows, alerts on issues.
 
 ---
 
@@ -157,7 +167,7 @@ Add to `~/.config/claude/settings.json`:
 
 ---
 
-## MCP Tools Reference
+## MCP Tools Reference (27 Tools)
 
 ### Task Management
 
@@ -165,11 +175,31 @@ Add to `~/.config/claude/settings.json`:
 |------|:---------:|:-----:|:--:|
 | `kanban_list_tasks` | all | own | - |
 | `kanban_get_task` | all | own | - |
+| `kanban_get_task_detail` | all | own | all |
 | `kanban_create_task` | ✓ | - | - |
 | `kanban_update_task` | all | own | - |
 | `kanban_assign_task` | ✓ | - | - |
 | `kanban_move_task` | all | own | - |
 | `kanban_delete_task` | ✓ | - | - |
+| `kanban_set_acceptance_criteria` | ✓ | - | - |
+
+### Sprint Management
+
+| Tool | Description |
+|------|-------------|
+| `kanban_sprint_create` | Create sprint with goal and success criteria |
+| `kanban_sprint_get` | Get sprint details |
+| `kanban_sprint_update_status` | Update status, record iteration notes |
+| `kanban_sprint_list` | List all sprints |
+
+### Iteration Tracking (Ralph Wiggum)
+
+| Tool | Description |
+|------|-------------|
+| `kanban_start_iteration` | Start new iteration on task |
+| `kanban_submit_iteration` | Submit work with summary and self-assessment |
+| `kanban_get_task_context` | Get learning insights for agent |
+| `kanban_log_activity` | Log significant actions |
 
 ### Dependencies & Health
 
@@ -179,6 +209,7 @@ Add to `~/.config/claude/settings.json`:
 | `kanban_remove_dependency` | Remove dependency (Architect) |
 | `kanban_get_stats` | Board statistics (all roles) |
 | `kanban_health_check` | Detect issues (all roles) |
+| `kanban_get_escalated_tasks` | Tasks exceeding max iterations |
 
 ### QA Workflow
 
@@ -186,88 +217,58 @@ Add to `~/.config/claude/settings.json`:
 |------|-------------|
 | `kanban_qa_list` | List tasks pending review |
 | `kanban_qa_approve` | Approve with optional notes |
-| `kanban_qa_reject` | Reject with feedback (min 10 chars) |
+| `kanban_qa_reject` | Reject with category, severity, suggested approach |
+
+### Learning System
+
+| Tool | Description |
+|------|-------------|
+| `kanban_get_learning_insights` | Get project lessons and conventions |
+| `kanban_add_lesson` | Record project-wide lesson |
+| `kanban_add_convention` | Document codebase convention |
 
 ---
 
-## System Prompts
+## Learning System
 
-<details>
-<summary><strong>Architect Prompt</strong> (click to expand)</summary>
+The 3-tier learning system accumulates knowledge from QA feedback:
 
-```markdown
-## Kanban Board Management
-
-You have access to a shared Kanban board for coordinating work across multiple agents.
-Your role is **architect** - you have full control over the board.
-
-### Available Columns
-- `backlog`: Tasks pending start
-- `in_progress`: Tasks in active development
-- `blocked`: Tasks blocked by dependencies or issues
-- `done`: Completed tasks (pending or approved by QA)
-
-### Priority Levels
-- `critical`: Urgent, needs immediate attention
-- `high`: Important, should be done soon
-- `medium`: Normal priority (default)
-- `low`: Can wait, nice to have
-
-### Workflow
-1. Run `kanban_get_stats` to see overall state
-2. Run `kanban_health_check` to detect any issues
-3. Create tasks in `backlog` with appropriate priority
-4. Set up dependencies between related tasks
-5. Assign tasks to agents (agent-alpha, agent-beta, agent-gamma)
-6. Monitor progress and resolve blockers
-
-All tools require `role: "architect"` parameter.
 ```
-</details>
-
-<details>
-<summary><strong>Agent Prompt</strong> (click to expand)</summary>
-
-```markdown
-## Kanban Board - Agent Instructions
-
-You have access to a shared Kanban board where you receive and report on tasks.
-Your role is **agent** with ID: `[REPLACE_WITH_AGENT_ID]`
-
-### Workflow
-1. Run `kanban_list_tasks` to see your assigned tasks
-2. Prioritize: critical > high > medium > low
-3. Move task to `in_progress` when starting
-4. Move to `done` when complete (goes to QA review)
-5. If QA rejects, check `qaFeedback` and fix
-
-### Restrictions
-- You can only view/modify tasks assigned to you
-- Cannot create, delete, or reassign tasks
-- All tools require `role: "agent"` and `agentId: "[YOUR_ID]"`
+┌─────────────────────────────────────────────────────────────┐
+│                     LEARNING TIERS                          │
+├─────────────────────────────────────────────────────────────┤
+│  TIER 1: Task Memory                                        │
+│  └─ Iteration history, feedback received, what worked       │
+├─────────────────────────────────────────────────────────────┤
+│  TIER 2: Agent Memory                                       │
+│  └─ Mistake patterns, strengths, avg iterations per task    │
+├─────────────────────────────────────────────────────────────┤
+│  TIER 3: Project Memory                                     │
+│  └─ Lessons and conventions (auto-promoted from patterns)   │
+└─────────────────────────────────────────────────────────────┘
 ```
-</details>
 
-<details>
-<summary><strong>QA Prompt</strong> (click to expand)</summary>
+**Example flow:**
+1. QA rejects task with `category: "testing"` feedback
+2. Agent's mistake pattern "testing" counter increments
+3. If pattern appears across multiple agents → promotes to project lesson
+4. Future agents receive this lesson in their context
 
-```markdown
-## Kanban Board - QA Instructions
+---
 
-You have access to a shared Kanban board where you review completed work.
-Your role is **qa** - you review tasks that agents have marked as done.
+## Interactive Dashboard
 
-### Workflow
-1. Run `kanban_qa_list` to see pending reviews
-2. For each task: verify implementation meets requirements
-3. Approve: `kanban_qa_approve` with optional notes
-4. Reject: `kanban_qa_reject` with detailed feedback
+Open http://localhost:3456 to view:
 
-### Rejection Guidelines
-Be specific about what's missing, what needs fixing, and how to verify.
-All tools require `role: "qa"` parameter.
-```
-</details>
+- **Kanban Board**: Real-time task columns with WebSocket updates
+- **Task Detail Modal**: Click any task to see:
+  - Acceptance criteria and verification steps
+  - Iteration progress bar
+  - Full iteration timeline (attempts, feedback, outcomes)
+  - Learning insights from this task
+- **Live Activity Feed**: Real-time stream of agent actions
+- **Sprint Info Bar**: Current sprint progress and iteration count
+- **Escalation Warnings**: Tasks exceeding max iterations
 
 ---
 
@@ -276,7 +277,8 @@ All tools require `role: "qa"` parameter.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `PORT` | 3456 | Web viewer port |
-| Data location | `./data/kanban.json` | Persistent storage |
+| Data location | `./data/kanban.json` | Task persistence |
+| Learning data | `./data/learning.json` | Learning system storage |
 
 ```bash
 PORT=8080 bun run src/index.ts
@@ -288,19 +290,23 @@ PORT=8080 bun run src/index.ts
 
 ```
 claude-kanban-mcp/
-├── .claude/skills/            # Workflow skills
-│   ├── kanban-architect/
-│   ├── kanban-agent/
-│   ├── kanban-qa/
-│   ├── kanban-sprint/
-│   └── kanban-review-loop/
+├── .claude/skills/            # Workflow skills (Ralph Wiggum enabled)
+│   ├── kanban-architect/      # Planning with acceptance criteria
+│   ├── kanban-agent/          # Iteration pattern execution
+│   ├── kanban-qa/             # Structured feedback reviews
+│   ├── kanban-sprint/         # Full dev cycle orchestration
+│   └── kanban-review-loop/    # Health monitoring daemon
 ├── src/
 │   ├── index.ts               # Entry point
-│   ├── store.ts               # Persistence layer
-│   ├── mcp/                   # MCP server & tools
+│   ├── store.ts               # Task & sprint persistence
+│   ├── learning.ts            # 3-tier learning system
+│   ├── types.ts               # Schemas with iteration tracking
+│   ├── mcp/                   # MCP server & 27 tools
 │   └── web/                   # HTTP/WebSocket server
-├── public/                    # Web viewer UI
-└── data/kanban.json           # Board state (auto-generated)
+├── public/                    # Interactive web dashboard
+└── data/
+    ├── kanban.json            # Board state
+    └── learning.json          # Learning data
 ```
 
 ---

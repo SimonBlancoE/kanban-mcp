@@ -1,13 +1,16 @@
 /**
  * Claude Kanban MCP - Client App
  * Visor en tiempo real del tablero Kanban via WebSocket
+ * Enhanced with Ralph Wiggum iteration tracking and learning insights
  */
 
 // ═══════════════════════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════════════════════
 
-let board = { tasks: [], lastModified: null };
+let board = { tasks: [], sprints: [], lastModified: null };
+let activityLog = [];
+const MAX_ACTIVITY_ITEMS = 50;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DOM ELEMENTS
@@ -37,6 +40,38 @@ const statElements = {
 const statusEl = document.getElementById("connection-status");
 const lastUpdateEl = document.getElementById("last-update");
 
+// Modal elements
+const modalOverlay = document.getElementById("modal-overlay");
+const modalTitle = document.getElementById("modal-title");
+const modalClose = document.getElementById("modal-close");
+const modalAssignee = document.getElementById("modal-assignee");
+const modalPriority = document.getElementById("modal-priority");
+const modalColumn = document.getElementById("modal-column");
+const modalDescription = document.getElementById("modal-description");
+const modalProgress = document.getElementById("modal-progress");
+const modalIterText = document.getElementById("modal-iter-text");
+const modalTimeline = document.getElementById("modal-timeline");
+const criteriaSection = document.getElementById("criteria-section");
+const modalCriteriaDesc = document.getElementById("modal-criteria-desc");
+const modalCriteriaSteps = document.getElementById("modal-criteria-steps");
+const modalCriteriaCmd = document.getElementById("modal-criteria-cmd");
+const learningSection = document.getElementById("learning-section");
+const modalLearning = document.getElementById("modal-learning");
+
+// Activity sidebar elements
+const activitySidebar = document.getElementById("activity-sidebar");
+const activityFeed = document.getElementById("activity-feed");
+const toggleActivityBtn = document.getElementById("toggle-activity");
+const closeSidebarBtn = document.getElementById("close-sidebar");
+
+// Sprint info elements
+const sprintInfo = document.getElementById("sprint-info");
+const sprintGoal = document.getElementById("sprint-goal");
+const sprintIter = document.getElementById("sprint-iter");
+
+// Escalated count
+const escalatedCount = document.getElementById("escalated-count");
+
 // ═══════════════════════════════════════════════════════════════════════════
 // WEBSOCKET CONNECTION
 // ═══════════════════════════════════════════════════════════════════════════
@@ -47,7 +82,7 @@ const MAX_RECONNECT_DELAY = 30000;
 
 function connect() {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  ws = new WebSocket(`${protocol}//${location.host}/ws`);
+  ws = new WebSocket(protocol + "//" + location.host + "/ws");
 
   ws.onopen = () => {
     console.log("[WS] Connected");
@@ -79,15 +114,13 @@ function connect() {
 function scheduleReconnect() {
   const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
   reconnectAttempts++;
-  console.log(`[WS] Reconnecting in ${delay}ms...`);
+  console.log("[WS] Reconnecting in " + delay + "ms...");
   setTimeout(connect, delay);
 }
 
 function updateConnectionStatus(connected) {
-  statusEl.className = `status ${connected ? "connected" : "disconnected"}`;
-  statusEl.querySelector(".status-text").textContent = connected
-    ? "Connected"
-    : "Disconnected";
+  statusEl.className = "status " + (connected ? "connected" : "disconnected");
+  statusEl.querySelector(".status-text").textContent = connected ? "Connected" : "Disconnected";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -101,6 +134,8 @@ function handleMessage(message) {
     case "board_update":
       board = message.payload;
       renderBoard();
+      updateSprintInfo();
+      checkEscalatedTasks();
       break;
 
     case "task_created":
@@ -125,20 +160,68 @@ function handleMessage(message) {
       removeTaskCard(message.payload.taskId);
       updateStats();
       break;
+
+    case "iteration_started":
+      addActivityItem({
+        type: "iteration-started",
+        agent: message.payload.agentId,
+        text: "Started iteration " + message.payload.iteration + "/" + message.payload.maxIterations,
+        task: message.payload.taskTitle,
+        taskId: message.payload.taskId,
+        timestamp: message.timestamp,
+      });
+      break;
+
+    case "iteration_completed":
+      var isRejected = message.payload.outcome === "rejected";
+      addActivityItem({
+        type: isRejected ? "iteration-rejected" : "iteration-completed",
+        agent: "",
+        text: isRejected
+          ? "Iteration " + message.payload.iteration + " rejected"
+          : "Iteration " + message.payload.iteration + " " + message.payload.outcome,
+        task: message.payload.taskTitle,
+        taskId: message.payload.taskId,
+        timestamp: message.timestamp,
+      });
+      break;
+
+    case "agent_activity":
+      addActivityItem({
+        type: "agent-activity",
+        agent: message.payload.agentId,
+        text: message.payload.activity,
+        task: message.payload.taskTitle,
+        taskId: message.payload.taskId,
+        timestamp: message.timestamp,
+      });
+      break;
+
+    case "sprint_created":
+    case "sprint_updated":
+      var sprintIndex = (board.sprints || []).findIndex(function(s) { return s.id === message.payload.id; });
+      if (sprintIndex >= 0) {
+        board.sprints[sprintIndex] = message.payload;
+      } else {
+        if (!board.sprints) board.sprints = [];
+        board.sprints.push(message.payload);
+      }
+      updateSprintInfo();
+      break;
   }
 
   updateLastUpdate(message.timestamp);
 }
 
 function updateTaskInState(task) {
-  const index = board.tasks.findIndex((t) => t.id === task.id);
+  var index = board.tasks.findIndex(function(t) { return t.id === task.id; });
   if (index !== -1) {
     board.tasks[index] = task;
   }
 }
 
 function removeTaskFromState(taskId) {
-  board.tasks = board.tasks.filter((t) => t.id !== taskId);
+  board.tasks = board.tasks.filter(function(t) { return t.id !== taskId; });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -146,213 +229,397 @@ function removeTaskFromState(taskId) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function renderBoard() {
-  // Limpiar todas las columnas
-  Object.values(columns).forEach((col) => (col.innerHTML = ""));
-
-  // Renderizar cada tarea
+  Object.values(columns).forEach(function(col) { col.textContent = ""; });
   board.tasks.forEach(renderTask);
-
-  // Actualizar estadísticas
   updateStats();
 }
 
 function renderTask(task) {
-  const card = createTaskCard(task);
+  var card = createTaskCard(task);
   columns[task.column].appendChild(card);
 }
 
 function createTaskCard(task) {
-  const card = document.createElement("div");
-  card.className = `task-card${task.pendingQa ? " pending-qa" : ""}`;
-  card.id = `task-${task.id}`;
+  var card = document.createElement("div");
+  card.className = "task-card" + (task.pendingQa ? " pending-qa" : "");
+  card.id = "task-" + task.id;
+  card.onclick = function() { openTaskModal(task.id); };
 
-  const assigneeClass = task.assignee ? "" : "unassigned";
-  const assigneeText = task.assignee || "Unassigned";
-  const priority = task.priority || "medium";
-  const priorityLabel = { critical: "CRIT", high: "HIGH", medium: "MED", low: "LOW" }[priority];
+  var priority = task.priority || "medium";
+  var priorityLabels = { critical: "CRIT", high: "HIGH", medium: "MED", low: "LOW" };
 
-  // Build dependency indicators
-  const dependsOnCount = (task.dependsOn || []).length;
-  const blocksCount = (task.blocks || []).length;
-  let dependencyHtml = "";
-  if (dependsOnCount > 0 || blocksCount > 0) {
-    dependencyHtml = `<div class="dependencies">`;
-    if (dependsOnCount > 0) {
-      dependencyHtml += `<span class="dep-badge depends-on" title="Depends on ${dependsOnCount} task(s)">⬅ ${dependsOnCount}</span>`;
-    }
-    if (blocksCount > 0) {
-      dependencyHtml += `<span class="dep-badge blocks" title="Blocks ${blocksCount} task(s)">➡ ${blocksCount}</span>`;
-    }
-    dependencyHtml += `</div>`;
+  // Header
+  var header = document.createElement("div");
+  header.className = "card-header";
+
+  var prioritySpan = document.createElement("span");
+  prioritySpan.className = "priority priority-" + priority;
+  prioritySpan.textContent = priorityLabels[priority];
+  header.appendChild(prioritySpan);
+
+  // Iteration badge
+  var iteration = task.iteration || 1;
+  var maxIterations = task.maxIterations || 3;
+  if (iteration > 1 || task.column === "in_progress") {
+    var iterBadge = document.createElement("span");
+    iterBadge.className = "iter-badge";
+    if (iteration > maxIterations) iterBadge.className += " danger";
+    else if (iteration > 1) iterBadge.className += " warning";
+    iterBadge.title = "Iteration " + iteration + " of " + maxIterations;
+    iterBadge.textContent = "I" + iteration + "/" + maxIterations;
+    header.appendChild(iterBadge);
   }
 
-  // QA status indicator
-  const qaStatusHtml = task.pendingQa
-    ? `<span class="qa-badge pending" title="Awaiting QA review">QA</span>`
-    : task.qaFeedback
-      ? `<span class="qa-badge ${task.qaFeedback.startsWith("APPROVED") ? "approved" : "rejected"}" title="${escapeHtml(task.qaFeedback)}">${task.qaFeedback.startsWith("APPROVED") ? "✓" : "✗"}</span>`
-      : "";
+  // QA badge
+  if (task.pendingQa) {
+    var qaBadge = document.createElement("span");
+    qaBadge.className = "qa-badge pending";
+    qaBadge.title = "Awaiting QA review";
+    qaBadge.textContent = "QA";
+    header.appendChild(qaBadge);
+  } else if (task.qaFeedback) {
+    var qaFeedbackBadge = document.createElement("span");
+    var isApproved = task.qaFeedback.startsWith("APPROVED");
+    qaFeedbackBadge.className = "qa-badge " + (isApproved ? "approved" : "rejected");
+    qaFeedbackBadge.title = task.qaFeedback;
+    qaFeedbackBadge.textContent = isApproved ? "✓" : "✗";
+    header.appendChild(qaFeedbackBadge);
+  }
 
-  card.innerHTML = `
-    <div class="card-header">
-      <span class="priority priority-${priority}">${priorityLabel}</span>
-      ${qaStatusHtml}
-      ${dependencyHtml}
-    </div>
-    <div class="title">${escapeHtml(task.title)}</div>
-    <div class="assignee ${assigneeClass}">${escapeHtml(assigneeText)}</div>
-    <div class="timestamp">${formatTime(task.updatedAt)}</div>
-    ${
-      task.description
-        ? `<div class="description">${escapeHtml(task.description)}</div>`
-        : ""
+  // Dependencies
+  var dependsOnCount = (task.dependsOn || []).length;
+  var blocksCount = (task.blocks || []).length;
+  if (dependsOnCount > 0 || blocksCount > 0) {
+    var depsDiv = document.createElement("div");
+    depsDiv.className = "dependencies";
+    if (dependsOnCount > 0) {
+      var depBadge = document.createElement("span");
+      depBadge.className = "dep-badge depends-on";
+      depBadge.title = "Depends on " + dependsOnCount + " task(s)";
+      depBadge.textContent = "← " + dependsOnCount;
+      depsDiv.appendChild(depBadge);
     }
-  `;
+    if (blocksCount > 0) {
+      var blocksBadge = document.createElement("span");
+      blocksBadge.className = "dep-badge blocks";
+      blocksBadge.title = "Blocks " + blocksCount + " task(s)";
+      blocksBadge.textContent = "→ " + blocksCount;
+      depsDiv.appendChild(blocksBadge);
+    }
+    header.appendChild(depsDiv);
+  }
+
+  card.appendChild(header);
+
+  // Title
+  var titleDiv = document.createElement("div");
+  titleDiv.className = "title";
+  titleDiv.textContent = task.title;
+  card.appendChild(titleDiv);
+
+  // Assignee
+  var assigneeDiv = document.createElement("div");
+  assigneeDiv.className = "assignee" + (task.assignee ? "" : " unassigned");
+  assigneeDiv.textContent = task.assignee || "Unassigned";
+  card.appendChild(assigneeDiv);
+
+  // Timestamp
+  var timestampDiv = document.createElement("div");
+  timestampDiv.className = "timestamp";
+  timestampDiv.textContent = formatTime(task.updatedAt);
+  card.appendChild(timestampDiv);
 
   return card;
 }
 
 function updateTaskCard(task) {
-  const card = document.getElementById(`task-${task.id}`);
-  if (!card) return;
-
-  // Update card class for pending QA
-  card.className = `task-card${task.pendingQa ? " pending-qa" : ""}`;
-
-  // Update priority
-  const priorityEl = card.querySelector(".priority");
-  if (priorityEl) {
-    const priority = task.priority || "medium";
-    const priorityLabel = { critical: "CRIT", high: "HIGH", medium: "MED", low: "LOW" }[priority];
-    priorityEl.className = `priority priority-${priority}`;
-    priorityEl.textContent = priorityLabel;
-  }
-
-  // Update QA badge
-  const cardHeader = card.querySelector(".card-header");
-  if (cardHeader) {
-    const existingQa = cardHeader.querySelector(".qa-badge");
-    if (existingQa) existingQa.remove();
-
-    if (task.pendingQa) {
-      const qaBadge = document.createElement("span");
-      qaBadge.className = "qa-badge pending";
-      qaBadge.title = "Awaiting QA review";
-      qaBadge.textContent = "QA";
-      cardHeader.insertBefore(qaBadge, cardHeader.querySelector(".dependencies"));
-    } else if (task.qaFeedback) {
-      const qaBadge = document.createElement("span");
-      qaBadge.className = `qa-badge ${task.qaFeedback.startsWith("APPROVED") ? "approved" : "rejected"}`;
-      qaBadge.title = task.qaFeedback;
-      qaBadge.textContent = task.qaFeedback.startsWith("APPROVED") ? "✓" : "✗";
-      cardHeader.insertBefore(qaBadge, cardHeader.querySelector(".dependencies"));
-    }
-
-    // Update dependencies
-    const existingDeps = cardHeader.querySelector(".dependencies");
-    if (existingDeps) existingDeps.remove();
-
-    const dependsOnCount = (task.dependsOn || []).length;
-    const blocksCount = (task.blocks || []).length;
-    if (dependsOnCount > 0 || blocksCount > 0) {
-      const depsDiv = document.createElement("div");
-      depsDiv.className = "dependencies";
-      if (dependsOnCount > 0) {
-        depsDiv.innerHTML += `<span class="dep-badge depends-on" title="Depends on ${dependsOnCount} task(s)">⬅ ${dependsOnCount}</span>`;
-      }
-      if (blocksCount > 0) {
-        depsDiv.innerHTML += `<span class="dep-badge blocks" title="Blocks ${blocksCount} task(s)">➡ ${blocksCount}</span>`;
-      }
-      cardHeader.appendChild(depsDiv);
-    }
-  }
-
-  const titleEl = card.querySelector(".title");
-  const assigneeEl = card.querySelector(".assignee");
-  const timestampEl = card.querySelector(".timestamp");
-  let descriptionEl = card.querySelector(".description");
-
-  titleEl.textContent = task.title;
-
-  assigneeEl.className = `assignee ${task.assignee ? "" : "unassigned"}`;
-  assigneeEl.textContent = task.assignee || "Unassigned";
-
-  timestampEl.textContent = formatTime(task.updatedAt);
-
-  // Actualizar descripción
-  if (task.description) {
-    if (descriptionEl) {
-      descriptionEl.textContent = task.description;
-    } else {
-      descriptionEl = document.createElement("div");
-      descriptionEl.className = "description";
-      descriptionEl.textContent = task.description;
-      card.appendChild(descriptionEl);
-    }
-  } else if (descriptionEl) {
-    descriptionEl.remove();
-  }
+  var oldCard = document.getElementById("task-" + task.id);
+  if (!oldCard) return;
+  var newCard = createTaskCard(task);
+  oldCard.replaceWith(newCard);
 }
 
 function moveTaskCard(task, fromColumn) {
-  const card = document.getElementById(`task-${task.id}`);
+  var card = document.getElementById("task-" + task.id);
   if (!card) return;
-
-  // Mover a la nueva columna
   columns[task.column].appendChild(card);
-
-  // Actualizar timestamp
-  const timestampEl = card.querySelector(".timestamp");
-  if (timestampEl) {
-    timestampEl.textContent = formatTime(task.updatedAt);
-  }
+  updateTaskCard(task);
 }
 
 function removeTaskCard(taskId) {
-  const card = document.getElementById(`task-${taskId}`);
-  if (card) {
-    card.remove();
-  }
+  var card = document.getElementById("task-" + taskId);
+  if (card) card.remove();
 }
 
 function updateStats() {
-  const stats = {
-    backlog: 0,
-    in_progress: 0,
-    blocked: 0,
-    done: 0,
-  };
+  var stats = { backlog: 0, in_progress: 0, blocked: 0, done: 0 };
+  board.tasks.forEach(function(task) { stats[task.column]++; });
 
-  board.tasks.forEach((task) => {
-    stats[task.column]++;
+  Object.keys(stats).forEach(function(column) {
+    if (columnCounts[column]) columnCounts[column].textContent = stats[column];
+    if (statElements[column]) statElements[column].textContent = stats[column];
   });
 
-  // Actualizar contadores de columnas
-  Object.entries(stats).forEach(([column, count]) => {
-    if (columnCounts[column]) {
-      columnCounts[column].textContent = count;
-    }
-    if (statElements[column]) {
-      statElements[column].textContent = count;
-    }
-  });
-
-  // Mostrar estado vacío si no hay tareas
-  Object.entries(columns).forEach(([column, el]) => {
-    if (stats[column] === 0 && !el.querySelector(".empty-state")) {
-      el.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-state-icon">📋</div>
-          <div class="empty-state-text">No tasks</div>
-        </div>
-      `;
+  Object.keys(columns).forEach(function(column) {
+    if (stats[column] === 0 && !columns[column].querySelector(".empty-state")) {
+      var empty = document.createElement("div");
+      empty.className = "empty-state";
+      var icon = document.createElement("div");
+      icon.className = "empty-state-icon";
+      icon.textContent = "📋";
+      var text = document.createElement("div");
+      text.className = "empty-state-text";
+      text.textContent = "No tasks";
+      empty.appendChild(icon);
+      empty.appendChild(text);
+      columns[column].appendChild(empty);
     }
   });
 }
 
 function updateLastUpdate(timestamp) {
-  if (timestamp) {
-    lastUpdateEl.textContent = `Last update: ${formatTime(timestamp)}`;
+  if (timestamp) lastUpdateEl.textContent = "Last update: " + formatTime(timestamp);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODAL
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function openTaskModal(taskId) {
+  try {
+    var response = await fetch("/api/task/" + taskId + "/detail");
+    if (!response.ok) throw new Error("Failed to fetch task detail");
+
+    var data = await response.json();
+    var task = data.task;
+    var iterationSummary = data.iterationSummary;
+
+    modalTitle.textContent = task.title;
+    modalAssignee.textContent = task.assignee || "Unassigned";
+    modalPriority.textContent = (task.priority || "medium").toUpperCase();
+    modalColumn.textContent = (task.column || "backlog").replace("_", " ").toUpperCase();
+    modalDescription.textContent = task.description || "No description";
+
+    var current = (iterationSummary && iterationSummary.current) || 1;
+    var max = (iterationSummary && iterationSummary.max) || 3;
+    var percentage = Math.min((current / max) * 100, 100);
+    modalProgress.style.width = percentage + "%";
+    modalProgress.className = "progress-fill";
+    if (current > max) modalProgress.classList.add("danger");
+    else if (current > 1) modalProgress.classList.add("warning");
+    modalIterText.textContent = "Iteration " + current + " of " + max;
+
+    // Acceptance criteria
+    if (task.acceptanceCriteria) {
+      criteriaSection.style.display = "block";
+      modalCriteriaDesc.textContent = task.acceptanceCriteria.description || "";
+      modalCriteriaSteps.textContent = "";
+      var steps = task.acceptanceCriteria.verificationSteps || [];
+      steps.forEach(function(step) {
+        var stepDiv = document.createElement("div");
+        stepDiv.className = "criteria-step";
+        stepDiv.textContent = step;
+        modalCriteriaSteps.appendChild(stepDiv);
+      });
+      if (task.acceptanceCriteria.testCommand) {
+        modalCriteriaCmd.textContent = task.acceptanceCriteria.testCommand;
+        modalCriteriaCmd.style.display = "block";
+      } else {
+        modalCriteriaCmd.style.display = "none";
+      }
+    } else {
+      criteriaSection.style.display = "none";
+    }
+
+    // Timeline
+    var iterationLog = task.iterationLog || [];
+    modalTimeline.textContent = "";
+    if (iterationLog.length > 0) {
+      iterationLog.forEach(function(entry) {
+        var entryDiv = document.createElement("div");
+        entryDiv.className = "timeline-entry " + entry.outcome;
+
+        var headerDiv = document.createElement("div");
+        headerDiv.className = "timeline-header";
+        var iterSpan = document.createElement("span");
+        iterSpan.className = "timeline-iter";
+        iterSpan.textContent = "Attempt " + entry.iteration;
+        var outcomeSpan = document.createElement("span");
+        outcomeSpan.className = "timeline-outcome " + entry.outcome;
+        outcomeSpan.textContent = entry.outcome.replace("_", " ");
+        headerDiv.appendChild(iterSpan);
+        headerDiv.appendChild(outcomeSpan);
+        entryDiv.appendChild(headerDiv);
+
+        if (entry.feedback) {
+          var feedbackDiv = document.createElement("div");
+          feedbackDiv.className = "timeline-feedback";
+          feedbackDiv.textContent = entry.feedback;
+          entryDiv.appendChild(feedbackDiv);
+        }
+
+        var timeDiv = document.createElement("div");
+        timeDiv.className = "timeline-time";
+        timeDiv.textContent = formatTime(entry.startedAt);
+        entryDiv.appendChild(timeDiv);
+
+        modalTimeline.appendChild(entryDiv);
+      });
+    } else {
+      var emptyDiv = document.createElement("div");
+      emptyDiv.className = "timeline-empty";
+      emptyDiv.textContent = "No iterations yet";
+      modalTimeline.appendChild(emptyDiv);
+    }
+
+    // Learning insights
+    learningSection.style.display = "none";
+    if (task.assignee) {
+      try {
+        var learningResponse = await fetch("/api/learning/agent/" + task.assignee);
+        if (learningResponse.ok) {
+          var learningData = await learningResponse.json();
+          if (learningData.mistakePatterns && learningData.mistakePatterns.length > 0) {
+            learningSection.style.display = "block";
+            modalLearning.textContent = "";
+            learningData.mistakePatterns.slice(0, 3).forEach(function(pattern) {
+              var patternDiv = document.createElement("div");
+              patternDiv.className = "learning-pattern";
+              var catSpan = document.createElement("span");
+              catSpan.className = "pattern-category";
+              catSpan.textContent = pattern.category;
+              var countSpan = document.createElement("span");
+              countSpan.className = "pattern-count";
+              countSpan.textContent = " (" + pattern.occurrences + " occurrences)";
+              var descDiv = document.createElement("div");
+              descDiv.className = "pattern-desc";
+              descDiv.textContent = pattern.description;
+              patternDiv.appendChild(catSpan);
+              patternDiv.appendChild(countSpan);
+              patternDiv.appendChild(descDiv);
+              modalLearning.appendChild(patternDiv);
+            });
+          }
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    modalOverlay.classList.add("open");
+  } catch (error) {
+    console.error("Error opening task modal:", error);
+  }
+}
+
+function closeTaskModal() {
+  modalOverlay.classList.remove("open");
+}
+
+modalClose.onclick = closeTaskModal;
+modalOverlay.onclick = function(e) {
+  if (e.target === modalOverlay) closeTaskModal();
+};
+document.addEventListener("keydown", function(e) {
+  if (e.key === "Escape") closeTaskModal();
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACTIVITY SIDEBAR
+// ═══════════════════════════════════════════════════════════════════════════
+
+function toggleActivitySidebar() {
+  activitySidebar.classList.toggle("open");
+  toggleActivityBtn.classList.toggle("active");
+}
+
+function closeActivitySidebar() {
+  activitySidebar.classList.remove("open");
+  toggleActivityBtn.classList.remove("active");
+}
+
+function addActivityItem(item) {
+  activityLog.unshift(item);
+  if (activityLog.length > MAX_ACTIVITY_ITEMS) {
+    activityLog = activityLog.slice(0, MAX_ACTIVITY_ITEMS);
+  }
+  renderActivityFeed();
+}
+
+function renderActivityFeed() {
+  activityFeed.textContent = "";
+  if (activityLog.length === 0) {
+    var emptyDiv = document.createElement("div");
+    emptyDiv.className = "activity-empty";
+    emptyDiv.textContent = "No activity yet";
+    activityFeed.appendChild(emptyDiv);
+    return;
+  }
+
+  activityLog.forEach(function(item) {
+    var itemDiv = document.createElement("div");
+    itemDiv.className = "activity-item " + item.type;
+
+    var headerDiv = document.createElement("div");
+    headerDiv.className = "activity-header";
+    var agentSpan = document.createElement("span");
+    agentSpan.className = "activity-agent";
+    agentSpan.textContent = item.agent || "System";
+    var timeSpan = document.createElement("span");
+    timeSpan.className = "activity-time";
+    timeSpan.textContent = formatTime(item.timestamp);
+    headerDiv.appendChild(agentSpan);
+    headerDiv.appendChild(timeSpan);
+
+    var textDiv = document.createElement("div");
+    textDiv.className = "activity-text";
+    textDiv.textContent = item.text;
+
+    var taskDiv = document.createElement("div");
+    taskDiv.className = "activity-task";
+    taskDiv.textContent = item.task;
+
+    itemDiv.appendChild(headerDiv);
+    itemDiv.appendChild(textDiv);
+    itemDiv.appendChild(taskDiv);
+    activityFeed.appendChild(itemDiv);
+  });
+}
+
+toggleActivityBtn.onclick = toggleActivitySidebar;
+closeSidebarBtn.onclick = closeActivitySidebar;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT INFO
+// ═══════════════════════════════════════════════════════════════════════════
+
+function updateSprintInfo() {
+  var sprints = board.sprints || [];
+  var activeSprint = sprints.find(function(s) {
+    return s.status === "planning" || s.status === "executing" || s.status === "reviewing";
+  });
+
+  if (activeSprint) {
+    sprintInfo.style.display = "flex";
+    sprintGoal.textContent = activeSprint.goal;
+    sprintIter.textContent = "Iter " + activeSprint.currentIteration + "/" + activeSprint.maxIterations;
+  } else {
+    sprintInfo.style.display = "none";
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ESCALATED TASKS CHECK
+// ═══════════════════════════════════════════════════════════════════════════
+
+function checkEscalatedTasks() {
+  var escalated = board.tasks.filter(function(t) {
+    return (t.iteration || 1) > (t.maxIterations || 3) && t.column !== "done";
+  });
+
+  if (escalated.length > 0) {
+    escalatedCount.style.display = "inline";
+    escalatedCount.textContent = escalated.length + " escalated";
+  } else {
+    escalatedCount.style.display = "none";
   }
 }
 
@@ -360,29 +627,20 @@ function updateLastUpdate(timestamp) {
 // UTILITIES
 // ═══════════════════════════════════════════════════════════════════════════
 
-function escapeHtml(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
-
 function formatTime(isoString) {
   if (!isoString) return "--";
+  var date = new Date(isoString);
+  var now = new Date();
+  var diffMs = now - date;
+  var diffMins = Math.floor(diffMs / 60000);
+  var diffHours = Math.floor(diffMs / 3600000);
+  var diffDays = Math.floor(diffMs / 86400000);
 
-  const date = new Date(isoString);
-  const now = new Date();
-  const diffMs = now - date;
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  // Formato relativo para actualizaciones recientes
   if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffMins < 60) return diffMins + "m ago";
+  if (diffHours < 24) return diffHours + "h ago";
+  if (diffDays < 7) return diffDays + "d ago";
 
-  // Formato absoluto para fechas más antiguas
   return date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -395,8 +653,5 @@ function formatTime(isoString) {
 // INITIALIZE
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Conectar al WebSocket al cargar la página
 connect();
-
-// Mostrar estado inicial
 updateStats();

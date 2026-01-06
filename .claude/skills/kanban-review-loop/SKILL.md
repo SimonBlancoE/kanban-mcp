@@ -5,7 +5,7 @@ description: Kanban continuous health monitoring daemon. USE WHEN user says /kan
 
 # Kanban Review Loop - Continuous Health Monitoring
 
-You are starting the **Review Loop** - a background daemon that continuously monitors Kanban board health.
+You are starting the **Review Loop** - a background daemon that continuously monitors Kanban board health with Ralph Wiggum awareness.
 
 ## Arguments
 
@@ -16,9 +16,11 @@ You are starting the **Review Loop** - a background daemon that continuously mon
 
 This runs as a background process that:
 1. Checks board health every 5 minutes
-2. Detects and reports issues
-3. Auto-spawns QA if review backlog grows
-4. Alerts on stale or blocked tasks
+2. **Monitors escalated tasks** (exceeded max iterations)
+3. Detects and reports issues
+4. Auto-spawns QA if review backlog grows
+5. Alerts on stale or blocked tasks
+6. **Tracks sprint progress**
 
 ## Start the Daemon
 
@@ -35,42 +37,85 @@ Task tool:
 ## Daemon Instructions
 
 ```
-You are the KANBAN REVIEW LOOP DAEMON.
+You are the KANBAN REVIEW LOOP DAEMON with Ralph Wiggum awareness.
 
 ## Main Loop (repeat continuously)
 
 ### Step 1: Health Check
 Run: kanban_health_check with role: "architect", staleThresholdHours: 24
 
-### Step 2: Analyze & Alert
+### Step 2: Check Escalations
+Run: kanban_get_escalated_tasks with role: "architect"
+
+### Step 3: Check Active Sprint
+Run: kanban_sprint_list with role: "architect"
+For each active sprint, check iteration count vs maxIterations.
+
+### Step 4: Analyze & Alert
 
 Check for issues:
 
-- **Stale tasks** (in_progress > 24h): Log "ALERT: Task [title] stale for [hours]h"
-- **QA backlog > 3**: Spawn QA sub-agent to clear backlog
-- **Overloaded agents** (> 5 tasks): Log "ALERT: Agent [id] overloaded"
-- **Low backlog** (< 3 tasks): Log "INFO: Backlog low, plan more work"
-- **Critical tasks not started**: Log "ALERT: Critical task [title] waiting"
+**CRITICAL ALERTS:**
+- **Escalated tasks** (exceeded maxIterations):
+  Log "CRITICAL: Task [title] escalated after [N] iterations - needs human review"
+- **Critical tasks not started**:
+  Log "ALERT: Critical task [title] waiting"
 
-### Step 3: Auto-Remediation
+**WARNING ALERTS:**
+- **High iteration tasks** (iteration >= maxIterations - 1):
+  Log "WARNING: Task [title] at iteration [N]/[max] - at risk of escalation"
+- **Stale tasks** (in_progress > 24h):
+  Log "WARNING: Task [title] stale for [hours]h"
+- **Sprint at risk** (iteration near max):
+  Log "WARNING: Sprint [goal] at iteration [N]/[max]"
+
+**INFO ALERTS:**
+- **QA backlog > 3**:
+  Log "INFO: QA backlog high, spawning QA agent"
+- **Overloaded agents** (> 5 tasks):
+  Log "INFO: Agent [id] overloaded with [N] tasks"
+- **Low backlog** (< 3 tasks):
+  Log "INFO: Backlog low, plan more work"
+
+### Step 5: Auto-Remediation
 
 If QA backlog > 3, spawn QA agent (NOT in background):
+```
+Task tool:
   subagent_type: "general-purpose"
-  prompt: "You are QA. Clear the backlog: kanban_qa_list, then approve/reject each."
+  prompt: |
+    You are QA. Clear the backlog.
+    1. kanban_qa_list with role: "qa"
+    2. For each task:
+       - kanban_get_task_detail to see iteration history
+       - Review and approve/reject with structured feedback
+```
 
-### Step 4: Report Status
+### Step 6: Report Status
 
 Output:
 ---
 [TIME] Review Loop Check #N
-Health: [OK | ISSUES]
-- Backlog: X | In Progress: Y | Blocked: Z | Pending QA: W
-Issues: [list]
-Actions: [any remediation taken]
+Health: [OK | WARNING | CRITICAL]
+
+Sprint Status:
+- [Sprint goal]: Iteration [N]/[max] - [status]
+
+Board:
+- Backlog: X | In Progress: Y | Blocked: Z | Done: W
+- Pending QA: Q
+- Escalated: E
+
+Issues:
+- [list of alerts]
+
+Actions Taken:
+- [any remediation]
+
 Next check in 5 minutes...
 ---
 
-### Step 5: Sleep
+### Step 7: Sleep
 Wait 5 minutes, then repeat from Step 1.
 ```
 
@@ -81,11 +126,24 @@ After starting:
 2. Check status: `TaskOutput with task_id, block: false`
 3. Stop: User kills the background task
 
+## Alert Priority
+
+| Level | Action |
+|-------|--------|
+| CRITICAL | Immediate notification, needs human intervention |
+| WARNING | Soon to become critical, monitor closely |
+| INFO | Informational, auto-remediation if possible |
+
 ## Examples
 
 ```
 User: "/kanban-review-loop"
 -> Spawn background daemon
 -> Report task ID for monitoring
--> Daemon runs continuously checking health
+-> Daemon runs continuously:
+   -> Checks health
+   -> Monitors escalations
+   -> Tracks sprint iterations
+   -> Alerts on issues
+   -> Auto-spawns QA when needed
 ```

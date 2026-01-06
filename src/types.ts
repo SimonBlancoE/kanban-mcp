@@ -8,6 +8,22 @@ export type Column = z.infer<typeof ColumnSchema>;
 export const PrioritySchema = z.enum(["low", "medium", "high", "critical"]);
 export type Priority = z.infer<typeof PrioritySchema>;
 
+// Feedback category for structured QA rejections
+export const FeedbackCategorySchema = z.enum([
+  "logic",
+  "testing",
+  "style",
+  "security",
+  "performance",
+  "missing-feature",
+  "other"
+]);
+export type FeedbackCategory = z.infer<typeof FeedbackCategorySchema>;
+
+// Feedback severity
+export const FeedbackSeveritySchema = z.enum(["minor", "major", "critical"]);
+export type FeedbackSeverity = z.infer<typeof FeedbackSeveritySchema>;
+
 // Nombres amigables para las prioridades (visor web)
 export const PRIORITY_LABELS: Record<Priority, string> = {
   low: "Low",
@@ -24,7 +40,29 @@ export const COLUMN_LABELS: Record<Column, string> = {
   done: "Done",
 };
 
-// Task schema - Estructura de una tarea
+// Acceptance criteria - Architect-defined success conditions
+export const AcceptanceCriteriaSchema = z.object({
+  description: z.string().min(1).max(500).describe("Human-readable success criteria"),
+  testCommand: z.string().max(500).optional().describe("Optional test command to verify"),
+  verificationSteps: z.array(z.string().max(200)).default([]).describe("Checklist items to verify"),
+});
+export type AcceptanceCriteria = z.infer<typeof AcceptanceCriteriaSchema>;
+
+// Iteration log entry - Records each attempt on a task
+export const IterationLogEntrySchema = z.object({
+  iteration: z.number().int().min(1),
+  startedAt: z.string().datetime(),
+  completedAt: z.string().datetime().optional(),
+  outcome: z.enum(["in_progress", "submitted", "approved", "rejected"]),
+  agentNotes: z.string().max(1000).optional().describe("Agent's notes about their work"),
+  feedback: z.string().max(2000).optional().describe("QA feedback if rejected"),
+  feedbackCategory: FeedbackCategorySchema.optional(),
+  feedbackSeverity: FeedbackSeveritySchema.optional(),
+  filesChanged: z.array(z.string()).default([]).describe("Files modified in this iteration"),
+});
+export type IterationLogEntry = z.infer<typeof IterationLogEntrySchema>;
+
+// Task schema - Estructura de una tarea (enhanced with Ralph Wiggum iteration tracking)
 export const TaskSchema = z.object({
   id: z.string().uuid(),
   title: z.string().min(1).max(200),
@@ -34,18 +72,64 @@ export const TaskSchema = z.object({
   blocks: z.array(z.string().uuid()).default([]),
   assignee: z.string().min(1).max(100).nullable(),
   column: ColumnSchema,
+
   // QA workflow fields
   pendingQa: z.boolean().default(false),
   qaFeedback: z.string().max(2000).nullable().default(null),
+
+  // Ralph Wiggum iteration tracking
+  iteration: z.number().int().min(1).default(1).describe("Current iteration number"),
+  maxIterations: z.number().int().min(1).default(3).describe("Max iterations before escalation"),
+  acceptanceCriteria: AcceptanceCriteriaSchema.optional().describe("Architect-defined success criteria"),
+  iterationLog: z.array(IterationLogEntrySchema).default([]).describe("History of all attempts"),
+
+  // Sprint association
+  sprintId: z.string().uuid().optional().describe("Associated sprint ID"),
+
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
 
 export type Task = z.infer<typeof TaskSchema>;
 
+// Sprint schema - Big picture goal tracking (Level 1 Ralph)
+export const SprintStatusSchema = z.enum(["planning", "executing", "reviewing", "complete", "failed"]);
+export type SprintStatus = z.infer<typeof SprintStatusSchema>;
+
+export const SprintSchema = z.object({
+  id: z.string().uuid(),
+  goal: z.string().min(1).max(500).describe("Sprint goal/objective"),
+  description: z.string().max(2000).default(""),
+  successCriteria: z.object({
+    description: z.string().max(500),
+    verificationSteps: z.array(z.string().max(200)).default([]),
+    testCommand: z.string().max(500).optional(),
+  }),
+  status: SprintStatusSchema.default("planning"),
+  currentIteration: z.number().int().min(1).default(1),
+  maxIterations: z.number().int().min(1).default(5),
+  taskIds: z.array(z.string().uuid()).default([]),
+
+  // Sprint iteration history
+  iterationHistory: z.array(z.object({
+    iteration: z.number().int().min(1),
+    startedAt: z.string().datetime(),
+    completedAt: z.string().datetime().optional(),
+    tasksCompleted: z.number().int().default(0),
+    tasksRejected: z.number().int().default(0),
+    lessonsLearned: z.array(z.string()).default([]),
+  })).default([]),
+
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type Sprint = z.infer<typeof SprintSchema>;
+
 // Board state - Estado completo del tablero
 export const BoardSchema = z.object({
   tasks: z.array(TaskSchema),
+  sprints: z.array(SprintSchema).default([]),
   lastModified: z.string().datetime(),
 });
 
@@ -99,7 +183,12 @@ export type WSEventType =
   | "task_created"
   | "task_updated"
   | "task_moved"
-  | "task_deleted";
+  | "task_deleted"
+  | "iteration_started"
+  | "iteration_completed"
+  | "sprint_created"
+  | "sprint_updated"
+  | "agent_activity";
 
 // Eventos WebSocket
 export interface WSBoardUpdate {
@@ -136,9 +225,67 @@ export interface WSTaskDeleted {
   timestamp: string;
 }
 
+// New: Iteration lifecycle events
+export interface WSIterationStarted {
+  type: "iteration_started";
+  payload: {
+    taskId: string;
+    taskTitle: string;
+    iteration: number;
+    maxIterations: number;
+    agentId: string;
+    acceptanceCriteria?: AcceptanceCriteria;
+  };
+  timestamp: string;
+}
+
+export interface WSIterationCompleted {
+  type: "iteration_completed";
+  payload: {
+    taskId: string;
+    taskTitle: string;
+    iteration: number;
+    outcome: "submitted" | "approved" | "rejected";
+    feedback?: string;
+    feedbackCategory?: FeedbackCategory;
+  };
+  timestamp: string;
+}
+
+// New: Sprint events
+export interface WSSprintCreated {
+  type: "sprint_created";
+  payload: Sprint;
+  timestamp: string;
+}
+
+export interface WSSprintUpdated {
+  type: "sprint_updated";
+  payload: Sprint;
+  timestamp: string;
+}
+
+// New: Live agent activity feed
+export interface WSAgentActivity {
+  type: "agent_activity";
+  payload: {
+    agentId: string;
+    taskId: string;
+    taskTitle: string;
+    activity: string;
+    activityType: "started" | "reading" | "editing" | "testing" | "submitting" | "addressing_feedback";
+  };
+  timestamp: string;
+}
+
 export type WSEvent =
   | WSBoardUpdate
   | WSTaskCreated
   | WSTaskUpdated
   | WSTaskMoved
-  | WSTaskDeleted;
+  | WSTaskDeleted
+  | WSIterationStarted
+  | WSIterationCompleted
+  | WSSprintCreated
+  | WSSprintUpdated
+  | WSAgentActivity;

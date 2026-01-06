@@ -3,7 +3,20 @@ import { z } from "zod";
 import { randomUUID } from "crypto";
 import { store } from "../store";
 import { broadcaster } from "../web/broadcast";
-import { ColumnSchema, RoleSchema, PrioritySchema, type Column, type Task } from "../types";
+import { learningStore } from "../learning";
+import {
+  ColumnSchema,
+  RoleSchema,
+  PrioritySchema,
+  FeedbackCategorySchema,
+  FeedbackSeveritySchema,
+  AcceptanceCriteriaSchema,
+  SprintStatusSchema,
+  type Column,
+  type Task,
+  type Sprint,
+  type AcceptanceCriteria,
+} from "../types";
 
 /**
  * Helper para respuestas de error
@@ -109,10 +122,11 @@ export function registerTools(server: McpServer): void {
 
   // ═══════════════════════════════════════════════════════════════════════════
   // KANBAN_CREATE_TASK - Crear nueva tarea (solo Architect)
+  // Enhanced with Ralph Wiggum acceptance criteria and iteration limits
   // ═══════════════════════════════════════════════════════════════════════════
   server.tool(
     "kanban_create_task",
-    "Create a new task (Architect only). Tasks start in backlog by default.",
+    "Create a new task (Architect only). Tasks start in backlog by default. Include acceptance criteria for clear success conditions.",
     {
       role: z.literal("architect").describe("Must be 'architect'"),
       title: z.string().min(1).max(200).describe("Task title (required)"),
@@ -132,8 +146,30 @@ export function registerTools(server: McpServer): void {
         .array(z.string().uuid())
         .optional()
         .describe("Array of task IDs this task depends on"),
+      // New: Ralph Wiggum acceptance criteria
+      acceptanceCriteria: z
+        .object({
+          description: z.string().min(1).max(500).describe("Human-readable success criteria"),
+          testCommand: z.string().max(500).optional().describe("Optional test command to verify"),
+          verificationSteps: z.array(z.string().max(200)).optional().describe("Checklist items to verify"),
+        })
+        .optional()
+        .describe("Acceptance criteria for task completion (architect-defined)"),
+      maxIterations: z
+        .number()
+        .int()
+        .min(1)
+        .max(10)
+        .optional()
+        .default(3)
+        .describe("Max iterations before escalation (default: 3)"),
+      sprintId: z
+        .string()
+        .uuid()
+        .optional()
+        .describe("Associate task with a sprint"),
     },
-    async ({ title, description, priority, assignee, column, dependsOn }) => {
+    async ({ title, description, priority, assignee, column, dependsOn, acceptanceCriteria, maxIterations, sprintId }) => {
       // Validate dependencies exist
       if (dependsOn && dependsOn.length > 0) {
         for (const depId of dependsOn) {
@@ -141,6 +177,11 @@ export function registerTools(server: McpServer): void {
             return errorResponse(`Dependency task not found: ${depId}`);
           }
         }
+      }
+
+      // Validate sprint exists if provided
+      if (sprintId && !store.getSprint(sprintId)) {
+        return errorResponse(`Sprint not found: ${sprintId}`);
       }
 
       const now = new Date().toISOString();
@@ -155,6 +196,16 @@ export function registerTools(server: McpServer): void {
         column: column ?? "backlog",
         pendingQa: false,
         qaFeedback: null,
+        // Ralph Wiggum fields
+        iteration: 1,
+        maxIterations: maxIterations ?? 3,
+        acceptanceCriteria: acceptanceCriteria ? {
+          description: acceptanceCriteria.description,
+          testCommand: acceptanceCriteria.testCommand,
+          verificationSteps: acceptanceCriteria.verificationSteps ?? [],
+        } : undefined,
+        iterationLog: [],
+        sprintId,
         createdAt: now,
         updatedAt: now,
       };
@@ -172,6 +223,15 @@ export function registerTools(server: McpServer): void {
         }
       }
 
+      // Add task to sprint if provided
+      if (sprintId) {
+        const sprint = store.getSprint(sprintId);
+        if (sprint) {
+          sprint.taskIds = [...(sprint.taskIds || []), task.id];
+          sprint.updatedAt = now;
+        }
+      }
+
       await store.persist();
 
       // Notificar a los visores web
@@ -180,6 +240,7 @@ export function registerTools(server: McpServer): void {
       return successResponse({
         message: "Task created successfully",
         task,
+        acceptanceCriteria: task.acceptanceCriteria ? "Set" : "Not set",
       });
     }
   );
@@ -597,10 +658,11 @@ export function registerTools(server: McpServer): void {
 
   // ═══════════════════════════════════════════════════════════════════════════
   // KANBAN_QA_REJECT - Rechazar tarea y devolverla al agente
+  // Enhanced with structured feedback for learning system
   // ═══════════════════════════════════════════════════════════════════════════
   server.tool(
     "kanban_qa_reject",
-    "Reject a task after QA review, returning it to in_progress with feedback (QA role only).",
+    "Reject a task after QA review, returning it to in_progress with structured feedback (QA role only). Feedback is used for learning.",
     {
       role: z.literal("qa").describe("Must be 'qa'"),
       taskId: z.string().uuid().describe("Task ID to reject"),
@@ -609,13 +671,24 @@ export function registerTools(server: McpServer): void {
         .min(10)
         .max(2000)
         .describe("Required feedback explaining why the task was rejected and what needs to be fixed"),
+      category: FeedbackCategorySchema.optional()
+        .default("other")
+        .describe("Feedback category for learning: logic, testing, style, security, performance, missing-feature, other"),
+      severity: FeedbackSeveritySchema.optional()
+        .default("major")
+        .describe("Severity: minor, major, critical"),
       targetColumn: z
         .enum(["in_progress", "blocked"])
         .optional()
         .default("in_progress")
         .describe("Where to return the task (default: in_progress)"),
+      suggestedApproach: z
+        .string()
+        .max(500)
+        .optional()
+        .describe("Optional hint for the agent on how to fix the issue"),
     },
-    async ({ taskId, feedback, targetColumn }) => {
+    async ({ taskId, feedback, category, severity, targetColumn, suggestedApproach }) => {
       const task = store.getTask(taskId);
 
       if (!task) {
@@ -627,22 +700,621 @@ export function registerTools(server: McpServer): void {
       }
 
       const fromColumn = task.column;
+      const feedbackCategory = category ?? "other";
+      const feedbackSeverity = severity ?? "major";
+
+      // Record rejection in iteration log
+      const result = store.recordIterationRejection(
+        taskId,
+        feedback,
+        feedbackCategory,
+        feedbackSeverity
+      );
+
+      // Record in learning system if agent is assigned
+      if (task.assignee) {
+        await learningStore.recordRejectionFeedback(
+          task.assignee,
+          taskId,
+          task.title,
+          feedback,
+          feedbackCategory,
+          feedbackSeverity
+        );
+      }
+
+      // Build full feedback message
+      let fullFeedback = `REJECTED [${feedbackCategory}/${feedbackSeverity}]: ${feedback}`;
+      if (suggestedApproach) {
+        fullFeedback += `\n\nSuggested approach: ${suggestedApproach}`;
+      }
+
       const updatedTask = store.updateTask(taskId, {
         column: targetColumn ?? "in_progress",
         pendingQa: false,
-        qaFeedback: `REJECTED: ${feedback}`,
+        qaFeedback: fullFeedback,
       });
       await store.persist();
 
+      // Broadcast events
       broadcaster.broadcast("task_moved", {
         task: updatedTask,
         fromColumn,
         toColumn: targetColumn ?? "in_progress",
       });
 
+      broadcaster.broadcast("iteration_completed", {
+        taskId,
+        taskTitle: task.title,
+        iteration: task.iteration - 1, // Was incremented in recordIterationRejection
+        outcome: "rejected",
+        feedback,
+        feedbackCategory,
+      });
+
+      // Check if max iterations reached
+      const warningMessage = result?.maxReached
+        ? ` WARNING: Task has exceeded max iterations (${task.iteration}/${task.maxIterations}). Consider escalating.`
+        : "";
+
       return successResponse({
-        message: `Task rejected and returned to '${targetColumn ?? "in_progress"}' with feedback`,
+        message: `Task rejected and returned to '${targetColumn ?? "in_progress"}'.${warningMessage}`,
+        iteration: task.iteration,
+        maxIterations: task.maxIterations,
+        maxReached: result?.maxReached ?? false,
+        feedbackCategory,
+        feedbackSeverity,
         task: updatedTask,
+      });
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SPRINT MANAGEMENT TOOLS (Level 1 Ralph Wiggum)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "kanban_sprint_create",
+    "Create a new sprint with goal and success criteria (Architect only).",
+    {
+      role: z.literal("architect").describe("Must be 'architect'"),
+      goal: z.string().min(1).max(500).describe("Sprint goal/objective"),
+      description: z.string().max(2000).optional().describe("Sprint description"),
+      successCriteria: z.object({
+        description: z.string().max(500).describe("How to know when sprint is complete"),
+        verificationSteps: z.array(z.string().max(200)).optional().describe("Checklist items"),
+        testCommand: z.string().max(500).optional().describe("Optional test command"),
+      }).describe("Success criteria for the sprint"),
+      maxIterations: z.number().int().min(1).max(10).optional().default(5)
+        .describe("Max sprint iterations before failure (default: 5)"),
+    },
+    async ({ goal, description, successCriteria, maxIterations }) => {
+      const now = new Date().toISOString();
+      const sprint: Sprint = {
+        id: randomUUID(),
+        goal,
+        description: description ?? "",
+        successCriteria: {
+          description: successCriteria.description,
+          verificationSteps: successCriteria.verificationSteps ?? [],
+          testCommand: successCriteria.testCommand,
+        },
+        status: "planning",
+        currentIteration: 1,
+        maxIterations: maxIterations ?? 5,
+        taskIds: [],
+        iterationHistory: [{
+          iteration: 1,
+          startedAt: now,
+          tasksCompleted: 0,
+          tasksRejected: 0,
+          lessonsLearned: [],
+        }],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      store.addSprint(sprint);
+      await store.persist();
+
+      broadcaster.broadcast("sprint_created", sprint);
+
+      return successResponse({
+        message: "Sprint created successfully",
+        sprint,
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_sprint_get",
+    "Get sprint details including tasks and iteration history.",
+    {
+      role: RoleSchema.describe("Your role"),
+      sprintId: z.string().uuid().describe("Sprint ID"),
+    },
+    async ({ sprintId }) => {
+      const sprint = store.getSprint(sprintId);
+      if (!sprint) {
+        return errorResponse(`Sprint not found: ${sprintId}`);
+      }
+
+      // Get task details
+      const tasks = sprint.taskIds.map(id => store.getTask(id)).filter(Boolean);
+      const taskSummary = {
+        total: tasks.length,
+        completed: tasks.filter(t => t?.column === "done" && !t?.pendingQa).length,
+        inProgress: tasks.filter(t => t?.column === "in_progress").length,
+        pendingQa: tasks.filter(t => t?.pendingQa).length,
+        blocked: tasks.filter(t => t?.column === "blocked").length,
+      };
+
+      return successResponse({
+        sprint,
+        taskSummary,
+        tasks: tasks.map(t => ({
+          id: t?.id,
+          title: t?.title,
+          column: t?.column,
+          iteration: t?.iteration,
+          maxIterations: t?.maxIterations,
+          pendingQa: t?.pendingQa,
+        })),
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_sprint_update_status",
+    "Update sprint status (Architect only).",
+    {
+      role: z.literal("architect").describe("Must be 'architect'"),
+      sprintId: z.string().uuid().describe("Sprint ID"),
+      status: SprintStatusSchema.describe("New status: planning, executing, reviewing, complete, failed"),
+    },
+    async ({ sprintId, status }) => {
+      const sprint = store.getSprint(sprintId);
+      if (!sprint) {
+        return errorResponse(`Sprint not found: ${sprintId}`);
+      }
+
+      const previousStatus = sprint.status;
+      const now = new Date().toISOString();
+
+      // If moving to new iteration, record current iteration completion
+      if (status === "executing" && previousStatus === "reviewing") {
+        const currentIterHistory = sprint.iterationHistory.find(
+          h => h.iteration === sprint.currentIteration
+        );
+        if (currentIterHistory) {
+          currentIterHistory.completedAt = now;
+          const tasks = sprint.taskIds.map(id => store.getTask(id)).filter(Boolean);
+          currentIterHistory.tasksCompleted = tasks.filter(
+            t => t?.column === "done" && !t?.pendingQa
+          ).length;
+          currentIterHistory.tasksRejected = tasks.filter(
+            t => (t?.iterationLog || []).some(e => e.outcome === "rejected")
+          ).length;
+        }
+
+        // Start new iteration
+        sprint.currentIteration++;
+        sprint.iterationHistory.push({
+          iteration: sprint.currentIteration,
+          startedAt: now,
+          tasksCompleted: 0,
+          tasksRejected: 0,
+          lessonsLearned: [],
+        });
+
+        // Check if max iterations exceeded
+        if (sprint.currentIteration > sprint.maxIterations) {
+          sprint.status = "failed";
+          store.updateSprint(sprintId, sprint);
+          await store.persist();
+          broadcaster.broadcast("sprint_updated", sprint);
+          return successResponse({
+            message: "Sprint failed: exceeded max iterations",
+            sprint,
+            maxIterationsExceeded: true,
+          });
+        }
+      }
+
+      sprint.status = status;
+      store.updateSprint(sprintId, sprint);
+      await store.persist();
+
+      broadcaster.broadcast("sprint_updated", sprint);
+
+      return successResponse({
+        message: `Sprint status updated: ${previousStatus} -> ${status}`,
+        sprint,
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_sprint_list",
+    "List all sprints.",
+    {
+      role: RoleSchema.describe("Your role"),
+      status: SprintStatusSchema.optional().describe("Filter by status"),
+    },
+    async ({ status }) => {
+      let sprints = store.getSprints();
+      if (status) {
+        sprints = sprints.filter(s => s.status === status);
+      }
+      return successResponse({
+        count: sprints.length,
+        sprints: sprints.map(s => ({
+          id: s.id,
+          goal: s.goal,
+          status: s.status,
+          currentIteration: s.currentIteration,
+          maxIterations: s.maxIterations,
+          taskCount: s.taskIds.length,
+        })),
+      });
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ITERATION & LEARNING TOOLS (Level 2 Ralph Wiggum)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "kanban_start_iteration",
+    "Start working on a task iteration (Agent only). Records the start of a new attempt.",
+    {
+      role: z.literal("agent").describe("Must be 'agent'"),
+      agentId: z.string().describe("Your agent ID"),
+      taskId: z.string().uuid().describe("Task ID to start working on"),
+    },
+    async ({ agentId, taskId }) => {
+      const task = store.getTask(taskId);
+      if (!task) {
+        return errorResponse(`Task not found: ${taskId}`);
+      }
+      if (task.assignee !== agentId) {
+        return errorResponse("Task is not assigned to you");
+      }
+
+      const entry = store.startIteration(taskId, agentId);
+      if (!entry) {
+        return errorResponse("Failed to start iteration");
+      }
+
+      await store.persist();
+
+      // Broadcast iteration start
+      broadcaster.broadcast("iteration_started", {
+        taskId,
+        taskTitle: task.title,
+        iteration: task.iteration,
+        maxIterations: task.maxIterations || 3,
+        agentId,
+        acceptanceCriteria: task.acceptanceCriteria,
+      });
+
+      // Get learning context for the agent
+      const learningContext = learningStore.getFullContext(agentId);
+
+      return successResponse({
+        message: `Started iteration ${task.iteration} of ${task.maxIterations}`,
+        task,
+        acceptanceCriteria: task.acceptanceCriteria,
+        iterationHistory: task.iterationLog,
+        learningContext: {
+          yourCommonMistakes: learningContext.agentMistakes.slice(0, 3),
+          recentFeedback: learningContext.agentRecentFeedback.slice(0, 3),
+          projectLessons: learningContext.projectLessons.slice(0, 5),
+        },
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_submit_iteration",
+    "Submit task for QA review with notes about what was done (Agent only).",
+    {
+      role: z.literal("agent").describe("Must be 'agent'"),
+      agentId: z.string().describe("Your agent ID"),
+      taskId: z.string().uuid().describe("Task ID"),
+      notes: z.string().max(1000).optional().describe("Notes about what you did in this iteration"),
+      filesChanged: z.array(z.string()).optional().describe("List of files you modified"),
+    },
+    async ({ agentId, taskId, notes, filesChanged }) => {
+      const task = store.getTask(taskId);
+      if (!task) {
+        return errorResponse(`Task not found: ${taskId}`);
+      }
+      if (task.assignee !== agentId) {
+        return errorResponse("Task is not assigned to you");
+      }
+
+      const entry = store.recordIterationSubmission(taskId, notes, filesChanged);
+      if (!entry) {
+        return errorResponse("Failed to record submission - no active iteration found");
+      }
+
+      // Move to done with pendingQa
+      const fromColumn = task.column;
+      store.updateTask(taskId, {
+        column: "done",
+        pendingQa: true,
+        qaFeedback: null,
+      });
+
+      await store.persist();
+
+      broadcaster.broadcast("task_moved", {
+        task: store.getTask(taskId),
+        fromColumn,
+        toColumn: "done",
+      });
+
+      return successResponse({
+        message: `Iteration ${task.iteration} submitted for QA review`,
+        iterationEntry: entry,
+        pendingQa: true,
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_get_task_context",
+    "Get full task context including iteration history and learning insights (Agent only).",
+    {
+      role: z.literal("agent").describe("Must be 'agent'"),
+      agentId: z.string().describe("Your agent ID"),
+      taskId: z.string().uuid().describe("Task ID"),
+    },
+    async ({ agentId, taskId }) => {
+      const task = store.getTask(taskId);
+      if (!task) {
+        return errorResponse(`Task not found: ${taskId}`);
+      }
+      if (task.assignee !== agentId) {
+        return errorResponse("Task is not assigned to you");
+      }
+
+      const detail = store.getTaskDetail(taskId);
+      const learningContext = learningStore.getFullContext(agentId);
+
+      return successResponse({
+        task: detail?.task,
+        iterationSummary: detail?.iterationSummary,
+        previousAttempts: (task.iterationLog || []).map(e => ({
+          iteration: e.iteration,
+          outcome: e.outcome,
+          feedback: e.feedback,
+          feedbackCategory: e.feedbackCategory,
+        })),
+        acceptanceCriteria: task.acceptanceCriteria,
+        learningContext: {
+          yourPatterns: learningContext.agentMistakes,
+          recentFeedback: learningContext.agentRecentFeedback,
+          projectLessons: learningContext.projectLessons,
+          codebaseConventions: learningContext.codebaseConventions,
+        },
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_get_learning_insights",
+    "Get learning insights for agents and project (Architect only).",
+    {
+      role: z.literal("architect").describe("Must be 'architect'"),
+      agentId: z.string().optional().describe("Get specific agent's learning profile"),
+    },
+    async ({ agentId }) => {
+      if (agentId) {
+        const profile = learningStore.getAgentProfile(agentId);
+        return successResponse({
+          agent: profile,
+        });
+      }
+
+      // Get all agent stats
+      const agentStats = learningStore.getAllAgentStats();
+      const projectLessons = learningStore.getRelevantLessons();
+      const conventions = learningStore.getCodebaseConventions();
+
+      return successResponse({
+        agents: agentStats,
+        projectLessons,
+        codebaseConventions: conventions,
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_add_lesson",
+    "Add a project-level lesson learned (Architect only).",
+    {
+      role: z.literal("architect").describe("Must be 'architect'"),
+      category: FeedbackCategorySchema.describe("Lesson category"),
+      lesson: z.string().min(10).max(500).describe("The lesson learned"),
+      source: z.string().max(100).optional().describe("Where this lesson came from"),
+    },
+    async ({ category, lesson, source }) => {
+      const newLesson = await learningStore.addProjectLesson(
+        category,
+        lesson,
+        source ?? "Manual entry"
+      );
+
+      return successResponse({
+        message: "Lesson added to project knowledge base",
+        lesson: newLesson,
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_add_convention",
+    "Add a codebase convention for agents to follow (Architect only).",
+    {
+      role: z.literal("architect").describe("Must be 'architect'"),
+      pattern: z.string().min(1).max(100).describe("Short pattern name"),
+      description: z.string().min(10).max(500).describe("Description of the convention"),
+      examples: z.array(z.string().max(200)).optional().describe("Example usages"),
+    },
+    async ({ pattern, description, examples }) => {
+      await learningStore.addCodebaseConvention(pattern, description, examples ?? []);
+
+      return successResponse({
+        message: "Convention added to codebase knowledge",
+        convention: { pattern, description, examples },
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_set_acceptance_criteria",
+    "Set or update acceptance criteria for a task (Architect only).",
+    {
+      role: z.literal("architect").describe("Must be 'architect'"),
+      taskId: z.string().uuid().describe("Task ID"),
+      criteria: z.object({
+        description: z.string().min(1).max(500).describe("Success criteria description"),
+        testCommand: z.string().max(500).optional().describe("Optional test command"),
+        verificationSteps: z.array(z.string().max(200)).optional().describe("Checklist items"),
+      }).describe("Acceptance criteria"),
+    },
+    async ({ taskId, criteria }) => {
+      const task = store.setAcceptanceCriteria(taskId, {
+        description: criteria.description,
+        testCommand: criteria.testCommand,
+        verificationSteps: criteria.verificationSteps ?? [],
+      });
+
+      if (!task) {
+        return errorResponse(`Task not found: ${taskId}`);
+      }
+
+      await store.persist();
+      broadcaster.broadcast("task_updated", task);
+
+      return successResponse({
+        message: "Acceptance criteria set",
+        task,
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_get_escalated_tasks",
+    "Get tasks that have exceeded max iterations and need attention (Architect only).",
+    {
+      role: z.literal("architect").describe("Must be 'architect'"),
+    },
+    async () => {
+      const escalated = store.getEscalatedTasks();
+
+      return successResponse({
+        count: escalated.length,
+        tasks: escalated.map(t => ({
+          id: t.id,
+          title: t.title,
+          iteration: t.iteration,
+          maxIterations: t.maxIterations,
+          assignee: t.assignee,
+          column: t.column,
+          lastFeedback: t.qaFeedback,
+          iterationLog: t.iterationLog,
+        })),
+        message: escalated.length > 0
+          ? `${escalated.length} task(s) need attention - exceeded max iterations`
+          : "No escalated tasks",
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_log_activity",
+    "Log agent activity for live dashboard feed (Agent only).",
+    {
+      role: z.literal("agent").describe("Must be 'agent'"),
+      agentId: z.string().describe("Your agent ID"),
+      taskId: z.string().uuid().describe("Task ID you're working on"),
+      activity: z.string().max(200).describe("What you're doing"),
+      activityType: z.enum(["started", "reading", "editing", "testing", "submitting", "addressing_feedback"])
+        .describe("Activity type"),
+    },
+    async ({ agentId, taskId, activity, activityType }) => {
+      const task = store.getTask(taskId);
+      if (!task) {
+        return errorResponse(`Task not found: ${taskId}`);
+      }
+
+      broadcaster.broadcast("agent_activity", {
+        agentId,
+        taskId,
+        taskTitle: task.title,
+        activity,
+        activityType,
+      });
+
+      return successResponse({
+        message: "Activity logged",
+      });
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ENHANCED TASK DETAIL
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "kanban_get_task_detail",
+    "Get detailed task information including iteration history and metrics.",
+    {
+      role: RoleSchema.describe("Your role"),
+      agentId: z.string().optional().describe("Agent ID (required for agent role)"),
+      taskId: z.string().uuid().describe("Task ID"),
+    },
+    async ({ role, agentId, taskId }) => {
+      const task = store.getTask(taskId);
+      if (!task) {
+        return errorResponse(`Task not found: ${taskId}`);
+      }
+
+      // Agent can only see their own tasks
+      if (role === "agent") {
+        if (!agentId) {
+          return errorResponse("agentId is required for agent role");
+        }
+        if (task.assignee !== agentId) {
+          return errorResponse("Access denied: task is not assigned to you");
+        }
+      }
+
+      const detail = store.getTaskDetail(taskId);
+
+      // Get sprint info if associated
+      let sprintInfo = null;
+      if (task.sprintId) {
+        const sprint = store.getSprint(task.sprintId);
+        if (sprint) {
+          sprintInfo = {
+            id: sprint.id,
+            goal: sprint.goal,
+            status: sprint.status,
+            currentIteration: sprint.currentIteration,
+          };
+        }
+      }
+
+      return successResponse({
+        task: detail?.task,
+        iterationSummary: detail?.iterationSummary,
+        iterationLog: task.iterationLog,
+        acceptanceCriteria: task.acceptanceCriteria,
+        sprint: sprintInfo,
       });
     }
   );

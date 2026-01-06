@@ -1,7 +1,20 @@
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import { join, dirname } from "path";
-import type { Board, Task, Column, BoardStats, HealthCheck, HealthIssue } from "./types";
+import type {
+  Board,
+  Task,
+  Column,
+  BoardStats,
+  HealthCheck,
+  HealthIssue,
+  Sprint,
+  SprintStatus,
+  AcceptanceCriteria,
+  IterationLogEntry,
+  FeedbackCategory,
+  FeedbackSeverity,
+} from "./types";
 
 // Resolver path absoluto al directorio data (relativo al módulo, no al cwd)
 const __dirname = dirname(import.meta.path);
@@ -11,10 +24,12 @@ const DATA_PATH = join(DATA_DIR, "kanban.json");
 /**
  * KanbanStore - Capa de persistencia para el tablero Kanban
  * Mantiene los datos en memoria y los sincroniza con un archivo JSON
+ * Enhanced with Ralph Wiggum iteration tracking and Sprint management
  */
 class KanbanStore {
   private board: Board = {
     tasks: [],
+    sprints: [],
     lastModified: new Date().toISOString(),
   };
 
@@ -310,6 +325,232 @@ class KanbanStore {
         ? "All systems healthy. No issues detected."
         : `Found ${issues.length} issue(s): ${issues.filter(i => i.severity === "critical").length} critical, ${issues.filter(i => i.severity === "high").length} high, ${issues.filter(i => i.severity === "medium").length} medium, ${issues.filter(i => i.severity === "low").length} low`,
     };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SPRINT MANAGEMENT (Level 1 Ralph Wiggum)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Get all sprints
+   */
+  getSprints(): Sprint[] {
+    return this.board.sprints || [];
+  }
+
+  /**
+   * Get a sprint by ID
+   */
+  getSprint(id: string): Sprint | undefined {
+    return (this.board.sprints || []).find(s => s.id === id);
+  }
+
+  /**
+   * Add a new sprint
+   */
+  addSprint(sprint: Sprint): void {
+    if (!this.board.sprints) {
+      this.board.sprints = [];
+    }
+    this.board.sprints.push(sprint);
+  }
+
+  /**
+   * Update a sprint
+   */
+  updateSprint(id: string, updates: Partial<Omit<Sprint, "id" | "createdAt">>): Sprint | null {
+    const sprint = this.getSprint(id);
+    if (!sprint) return null;
+
+    Object.assign(sprint, updates, { updatedAt: new Date().toISOString() });
+    return sprint;
+  }
+
+  /**
+   * Delete a sprint
+   */
+  deleteSprint(id: string): boolean {
+    if (!this.board.sprints) return false;
+    const index = this.board.sprints.findIndex(s => s.id === id);
+    if (index === -1) return false;
+
+    this.board.sprints.splice(index, 1);
+    return true;
+  }
+
+  /**
+   * Get the active sprint (if any)
+   */
+  getActiveSprint(): Sprint | undefined {
+    return (this.board.sprints || []).find(
+      s => s.status === "planning" || s.status === "executing" || s.status === "reviewing"
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ITERATION TRACKING (Level 2 Ralph Wiggum)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Start a new iteration for a task
+   */
+  startIteration(taskId: string, agentId: string): IterationLogEntry | null {
+    const task = this.getTask(taskId);
+    if (!task) return null;
+
+    const now = new Date().toISOString();
+    const entry: IterationLogEntry = {
+      iteration: task.iteration,
+      startedAt: now,
+      outcome: "in_progress",
+      filesChanged: [],
+    };
+
+    if (!task.iterationLog) {
+      task.iterationLog = [];
+    }
+    task.iterationLog.push(entry);
+    task.updatedAt = now;
+
+    return entry;
+  }
+
+  /**
+   * Record iteration submission (agent finished, awaiting QA)
+   */
+  recordIterationSubmission(
+    taskId: string,
+    agentNotes?: string,
+    filesChanged?: string[]
+  ): IterationLogEntry | null {
+    const task = this.getTask(taskId);
+    if (!task || !task.iterationLog || task.iterationLog.length === 0) return null;
+
+    const currentEntry = task.iterationLog[task.iterationLog.length - 1];
+    if (currentEntry.outcome !== "in_progress") return null;
+
+    const now = new Date().toISOString();
+    currentEntry.outcome = "submitted";
+    currentEntry.completedAt = now;
+    if (agentNotes) currentEntry.agentNotes = agentNotes;
+    if (filesChanged) currentEntry.filesChanged = filesChanged;
+
+    task.updatedAt = now;
+    return currentEntry;
+  }
+
+  /**
+   * Record iteration approval (QA approved)
+   */
+  recordIterationApproval(taskId: string, notes?: string): IterationLogEntry | null {
+    const task = this.getTask(taskId);
+    if (!task || !task.iterationLog || task.iterationLog.length === 0) return null;
+
+    const currentEntry = task.iterationLog[task.iterationLog.length - 1];
+    if (currentEntry.outcome !== "submitted") return null;
+
+    const now = new Date().toISOString();
+    currentEntry.outcome = "approved";
+    currentEntry.completedAt = now;
+    if (notes) currentEntry.feedback = notes;
+
+    task.updatedAt = now;
+    return currentEntry;
+  }
+
+  /**
+   * Record iteration rejection (QA rejected)
+   * @returns Object with updated entry and whether max iterations reached
+   */
+  recordIterationRejection(
+    taskId: string,
+    feedback: string,
+    category?: FeedbackCategory,
+    severity?: FeedbackSeverity
+  ): { entry: IterationLogEntry; maxReached: boolean } | null {
+    const task = this.getTask(taskId);
+    if (!task || !task.iterationLog || task.iterationLog.length === 0) return null;
+
+    const currentEntry = task.iterationLog[task.iterationLog.length - 1];
+    if (currentEntry.outcome !== "submitted") return null;
+
+    const now = new Date().toISOString();
+    currentEntry.outcome = "rejected";
+    currentEntry.completedAt = now;
+    currentEntry.feedback = feedback;
+    if (category) currentEntry.feedbackCategory = category;
+    if (severity) currentEntry.feedbackSeverity = severity;
+
+    // Increment iteration counter
+    task.iteration++;
+    task.updatedAt = now;
+
+    const maxReached = task.iteration > (task.maxIterations || 3);
+    return { entry: currentEntry, maxReached };
+  }
+
+  /**
+   * Get task detail with iteration history
+   */
+  getTaskDetail(taskId: string): {
+    task: Task;
+    iterationSummary: {
+      current: number;
+      max: number;
+      totalAttempts: number;
+      rejectionCount: number;
+      avgIterationTime?: number;
+    };
+  } | null {
+    const task = this.getTask(taskId);
+    if (!task) return null;
+
+    const log = task.iterationLog || [];
+    const rejections = log.filter(e => e.outcome === "rejected").length;
+
+    // Calculate average iteration time
+    let avgTime: number | undefined;
+    const completedIterations = log.filter(e => e.completedAt);
+    if (completedIterations.length > 0) {
+      const totalMs = completedIterations.reduce((sum, entry) => {
+        const start = new Date(entry.startedAt).getTime();
+        const end = new Date(entry.completedAt!).getTime();
+        return sum + (end - start);
+      }, 0);
+      avgTime = totalMs / completedIterations.length / 1000 / 60; // minutes
+    }
+
+    return {
+      task,
+      iterationSummary: {
+        current: task.iteration,
+        max: task.maxIterations || 3,
+        totalAttempts: log.length,
+        rejectionCount: rejections,
+        avgIterationTime: avgTime,
+      },
+    };
+  }
+
+  /**
+   * Set acceptance criteria for a task
+   */
+  setAcceptanceCriteria(taskId: string, criteria: AcceptanceCriteria): Task | null {
+    const task = this.getTask(taskId);
+    if (!task) return null;
+
+    task.acceptanceCriteria = criteria;
+    task.updatedAt = new Date().toISOString();
+    return task;
+  }
+
+  /**
+   * Get tasks that have exceeded max iterations (need escalation)
+   */
+  getEscalatedTasks(): Task[] {
+    return this.board.tasks.filter(
+      t => t.iteration > (t.maxIterations || 3) && t.column !== "done"
+    );
   }
 }
 
