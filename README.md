@@ -1,6 +1,6 @@
 # Claude Kanban MCP
 
-[![npm version](https://badge.fury.io/js/@simonblanco%2Fkanban-mcp.svg)](https://www.npmjs.com/package/@simonblanco/kanban-mcp)
+[![npm version](https://img.shields.io/npm/v/@simonblanco/kanban-mcp)](https://www.npmjs.com/package/@simonblanco/kanban-mcp)
 
 A Kanban board MCP server for AI agent coordination with **Ralph Wiggum iterative refinement**, real-time web viewer, and 3-tier learning system.
 
