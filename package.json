@@ -1,6 +1,6 @@
 {
   "name": "@simonblanco/kanban-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "MCP Kanban board for AI agents coordination with real-time web viewer for human supervision",
   "author": "Simon Blanco <simonblanco@proton.me>",
@@ -31,6 +31,7 @@
     "src",
     "public",
     "bin",
+    ".claude",
     "README.md",
     "LICENSE"
   ],
