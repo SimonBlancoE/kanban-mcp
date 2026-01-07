@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { store } from "../store";
 import { broadcaster } from "../web/broadcast";
 import { learningStore } from "../learning";
+import { sessionStore } from "../sessions";
 import {
   ColumnSchema,
   RoleSchema,
@@ -1389,6 +1390,274 @@ export function registerTools(server: McpServer): void {
         iterationLog: task.iterationLog,
         acceptanceCriteria: task.acceptanceCriteria,
         sprint: sprintInfo,
+      });
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CONTEXT BRIDGE TOOLS (Long-Running Agent Support)
+  // Based on Anthropic's "Effective harnesses for long-running agents"
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "kanban_session_start",
+    "Start a new session and get context for an agent. Returns board state, recent activity, urgent items, last session notes, suggested next task, and learning context. Use this at the START of every session.",
+    {
+      agentId: z.string().min(1).max(100).describe("Your agent ID (e.g., 'agent-alpha')"),
+      contextSummary: z.string().max(500).optional().describe("Brief description of what you plan to work on"),
+    },
+    async ({ agentId, contextSummary }) => {
+      // Start session
+      const session = sessionStore.startSession(agentId, contextSummary);
+
+      // Get context
+      const context = sessionStore.getSessionContext(agentId);
+
+      return successResponse({
+        sessionId: session.id,
+        message: "Session started. Review the context below before beginning work.",
+        context: {
+          boardSummary: context.boardSummary,
+          activeSprint: context.activeSprint ? {
+            id: context.activeSprint.id,
+            goal: context.activeSprint.goal,
+            status: context.activeSprint.status,
+            iteration: `${context.activeSprint.currentIteration}/${context.activeSprint.maxIterations}`,
+          } : null,
+          urgentItems: {
+            escalated: context.urgentItems.escalated.map(t => ({ id: t.id, title: t.title, iteration: `${t.iteration}/${t.maxIterations}` })),
+            blocked: context.urgentItems.blocked.map(t => ({ id: t.id, title: t.title })),
+            critical: context.urgentItems.critical.map(t => ({ id: t.id, title: t.title, priority: t.priority })),
+          },
+          lastSession: context.lastSession,
+          suggestedNextTask: context.suggestedNextTask ? {
+            id: context.suggestedNextTask.id,
+            title: context.suggestedNextTask.title,
+            priority: context.suggestedNextTask.priority,
+            acceptanceCriteria: context.suggestedNextTask.acceptanceCriteria,
+          } : null,
+          learningContext: context.learningContext,
+          recentActivity: context.recentActivity.slice(0, 5),
+        },
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_session_end",
+    "End the current session with notes. Use this BEFORE ending ANY session (context window limit, user stop, or task complete). If cleanState is true, automatically commits changes to git.",
+    {
+      agentId: z.string().min(1).max(100).describe("Your agent ID"),
+      sessionNotes: z.string().min(1).max(2000).describe("What you accomplished this session"),
+      pendingItems: z.array(z.string().max(500)).optional().describe("What's still in progress or planned next"),
+      knownIssues: z.array(z.string().max(500)).optional().describe("Any bugs, concerns, or blockers discovered"),
+      cleanState: z.boolean().describe("Set to true if all work is committed and tests pass. This triggers an automatic git commit."),
+      commitMessage: z.string().max(200).optional().describe("Custom git commit message (auto-generated if omitted)"),
+    },
+    async ({ agentId, sessionNotes, pendingItems, knownIssues, cleanState, commitMessage }) => {
+      const result = await sessionStore.endSession({
+        agentId,
+        sessionNotes,
+        pendingItems,
+        knownIssues,
+        cleanState,
+        commitMessage,
+      });
+
+      return successResponse({
+        sessionId: result.sessionId,
+        message: cleanState
+          ? result.gitCommitHash
+            ? `Session ended with clean state. Git commit: ${result.gitCommitHash}`
+            : "Session ended with clean state. No changes to commit."
+          : "Session ended. Note: State was not marked as clean, so no git commit was made.",
+        gitCommitHash: result.gitCommitHash,
+        summaryFileUpdated: true,
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_generate_summary",
+    "Generate a human-readable board state summary file (data/session-summary.md). This is the equivalent of claude-progress.txt from the Anthropic article.",
+    {
+      detailed: z.boolean().optional().default(false).describe("Include more detailed information"),
+    },
+    async ({ detailed }) => {
+      sessionStore.generateSummaryFile();
+
+      // Also return the summary content
+      const stats = store.getStats();
+      const activeSprint = store.getActiveSprint();
+      const escalated = store.getEscalatedTasks();
+      const blocked = store.getBlockedTasks();
+
+      return successResponse({
+        message: "Summary file generated at data/session-summary.md",
+        summary: {
+          totalTasks: stats.total,
+          byColumn: {
+            backlog: stats.backlog,
+            inProgress: stats.in_progress,
+            blocked: stats.blocked,
+            done: stats.done,
+          },
+          pendingQa: stats.pendingQa,
+          activeSprint: activeSprint ? {
+            goal: activeSprint.goal,
+            status: activeSprint.status,
+            iteration: `${activeSprint.currentIteration}/${activeSprint.maxIterations}`,
+          } : null,
+          attentionRequired: {
+            escalated: escalated.length,
+            blocked: blocked.length,
+          },
+        },
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_verify_board_health",
+    "Quick health check before starting new work. Returns recommendation: 'proceed' (safe to start), 'fix_first' (address issues), or 'escalate' (needs human review).",
+    {},
+    async () => {
+      const health = sessionStore.verifyBoardHealth();
+
+      return successResponse({
+        healthy: health.healthy,
+        recommendation: health.recommendation,
+        suggestedAction: health.suggestedAction,
+        issues: health.issues,
+        message: health.recommendation === "proceed"
+          ? "Board is healthy. You can proceed with new work."
+          : health.recommendation === "fix_first"
+          ? `Address these issues before starting new work: ${health.suggestedAction}`
+          : `Human review needed: ${health.suggestedAction}`,
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_initialize_project",
+    "Initialize an empty board with project scaffolding. Use this when the board is empty to set up initial structure. Auto-triggered by kanban-initializer skill.",
+    {
+      projectName: z.string().min(1).max(200).describe("Name of the project"),
+      description: z.string().max(2000).describe("Project description"),
+      features: z.array(z.string().max(500)).min(1).describe("List of high-level features to implement"),
+      techStack: z.array(z.string().max(100)).optional().describe("Technology stack (e.g., ['React', 'Node', 'SQLite'])"),
+      constraints: z.array(z.string().max(200)).optional().describe("Project constraints (e.g., ['Must work offline'])"),
+    },
+    async ({ projectName, description, features, techStack, constraints }) => {
+      // Check if board is empty
+      if (!store.isEmpty()) {
+        return errorResponse("Board is not empty. Initialization is only for empty boards.");
+      }
+
+      const now = new Date().toISOString();
+      const sprintId = randomUUID();
+
+      // Create initial sprint
+      const sprint: Sprint = {
+        id: sprintId,
+        goal: projectName,
+        description,
+        successCriteria: {
+          description: `Complete initial implementation of ${projectName}`,
+          verificationSteps: features.map(f => `Verify: ${f}`),
+        },
+        status: "planning",
+        currentIteration: 1,
+        maxIterations: 5,
+        taskIds: [],
+        iterationHistory: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      store.addSprint(sprint);
+      await store.persist();
+
+      // Create tasks for each feature
+      const tasks: Task[] = [];
+      for (let i = 0; i < features.length; i++) {
+        const taskId = randomUUID();
+        const task: Task = {
+          id: taskId,
+          title: features[i],
+          description: `Implement: ${features[i]}`,
+          priority: i < 3 ? "high" : "medium", // First 3 features are high priority
+          column: "backlog",
+          assignee: null,
+          dependsOn: [],
+          blocks: [],
+          pendingQa: false,
+          qaFeedback: null,
+          iteration: 1,
+          maxIterations: 3,
+          acceptanceCriteria: {
+            description: `Feature "${features[i]}" is fully implemented and working`,
+            verificationSteps: [
+              "Feature works as expected",
+              "No regressions in existing functionality",
+              "Code follows project conventions",
+            ],
+          },
+          iterationLog: [],
+          sprintId,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        store.addTask(task);
+        tasks.push(task);
+        sprint.taskIds.push(taskId);
+      }
+
+      // Update sprint with task IDs
+      store.updateSprint(sprintId, { taskIds: sprint.taskIds });
+      await store.persist();
+
+      // Add conventions if tech stack provided
+      if (techStack && techStack.length > 0) {
+        await learningStore.addCodebaseConvention(
+          "Tech Stack",
+          `This project uses: ${techStack.join(", ")}`,
+          techStack
+        );
+      }
+
+      // Add constraints as lessons
+      if (constraints && constraints.length > 0) {
+        for (const constraint of constraints) {
+          await learningStore.addProjectLesson(
+            "other",
+            constraint,
+            "Project initialization",
+            ["all"]
+          );
+        }
+      }
+
+      // Generate initial summary
+      sessionStore.generateSummaryFile();
+
+      // Broadcast updates
+      broadcaster.broadcast("sprint_created", sprint);
+      for (const task of tasks) {
+        broadcaster.broadcast("task_created", task);
+      }
+
+      return successResponse({
+        message: `Project "${projectName}" initialized successfully`,
+        sprint: {
+          id: sprintId,
+          goal: projectName,
+          taskCount: tasks.length,
+        },
+        tasks: tasks.map(t => ({ id: t.id, title: t.title, priority: t.priority })),
+        conventions: techStack ? [`Tech Stack: ${techStack.join(", ")}`] : [],
+        constraints: constraints || [],
       });
     }
   );

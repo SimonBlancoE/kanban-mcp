@@ -1,12 +1,5 @@
-import { readFile, writeFile, mkdir } from "fs/promises";
-import { existsSync } from "fs";
-import { join, dirname } from "path";
+import { db } from "./db/database";
 import type { FeedbackCategory, FeedbackSeverity } from "./types";
-
-// Resolver path absoluto al directorio data
-const __dirname = dirname(import.meta.path);
-const DATA_DIR = join(__dirname, "..", "data");
-const LEARNING_PATH = join(DATA_DIR, "learning.json");
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LEARNING DATA STRUCTURES
@@ -69,7 +62,7 @@ export interface CodebaseConvention {
 }
 
 /**
- * Complete learning store structure
+ * Complete learning store structure (for compatibility)
  */
 export interface LearningData {
   agents: Record<string, AgentLearningProfile>;
@@ -81,48 +74,34 @@ export interface LearningData {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// LEARNING STORE CLASS
+// LEARNING STORE CLASS (SQLite-backed)
 // ═══════════════════════════════════════════════════════════════════════════
 
 class LearningStore {
-  private data: LearningData = {
-    agents: {},
-    project: {
-      lessonsLearned: [],
-      codebaseConventions: [],
-      lastUpdated: new Date().toISOString(),
-    },
-  };
+  private initialized = false;
 
   /**
-   * Load learning data from disk
+   * Initialize the learning store (no-op for SQLite, kept for API compatibility)
    */
   async load(): Promise<void> {
-    if (!existsSync(DATA_DIR)) {
-      await mkdir(DATA_DIR, { recursive: true });
-    }
+    if (this.initialized) return;
 
-    if (existsSync(LEARNING_PATH)) {
-      try {
-        const raw = await readFile(LEARNING_PATH, "utf-8");
-        this.data = JSON.parse(raw);
-        console.error(`[Learning] Loaded learning data for ${Object.keys(this.data.agents).length} agents`);
-      } catch (error) {
-        console.error("[Learning] Error loading data, starting fresh:", error);
-        await this.persist();
-      }
-    } else {
-      console.error("[Learning] No existing learning data, creating new store");
-      await this.persist();
-    }
+    // Ensure database is initialized
+    db.initialize();
+
+    const agentCount = this.getAllAgentStats().length;
+    const lessonCount = this.getRelevantLessons().length;
+    console.error(`[Learning] Loaded data for ${agentCount} agents, ${lessonCount} lessons from SQLite`);
+
+    this.initialized = true;
   }
 
   /**
-   * Persist learning data to disk
+   * No-op for SQLite (auto-persists on every write)
+   * Kept for API compatibility
    */
   async persist(): Promise<void> {
-    this.data.project.lastUpdated = new Date().toISOString();
-    await writeFile(LEARNING_PATH, JSON.stringify(this.data, null, 2));
+    // SQLite auto-persists
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -133,35 +112,55 @@ class LearningStore {
    * Get or create an agent's learning profile
    */
   getAgentProfile(agentId: string): AgentLearningProfile {
-    if (!this.data.agents[agentId]) {
-      this.data.agents[agentId] = {
-        agentId,
-        tasksCompleted: 0,
-        totalIterations: 0,
-        avgIterationsPerTask: 0,
-        mistakePatterns: [],
-        strengths: [],
-        recentFeedback: [],
-        lastUpdated: new Date().toISOString(),
-      };
+    const row = db.queryOne<{ data: string }>(
+      "SELECT data FROM learning_agents WHERE agent_id = ?",
+      [agentId]
+    );
+
+    if (row) {
+      return JSON.parse(row.data) as AgentLearningProfile;
     }
-    return this.data.agents[agentId];
+
+    // Create new profile
+    const newProfile: AgentLearningProfile = {
+      agentId,
+      tasksCompleted: 0,
+      totalIterations: 0,
+      avgIterationsPerTask: 0,
+      mistakePatterns: [],
+      strengths: [],
+      recentFeedback: [],
+      lastUpdated: new Date().toISOString(),
+    };
+
+    db.run("INSERT INTO learning_agents (agent_id, data) VALUES (?, ?)", [
+      agentId,
+      JSON.stringify(newProfile),
+    ]);
+
+    return newProfile;
+  }
+
+  /**
+   * Save an agent profile
+   */
+  private saveAgentProfile(profile: AgentLearningProfile): void {
+    db.run("INSERT OR REPLACE INTO learning_agents (agent_id, data) VALUES (?, ?)", [
+      profile.agentId,
+      JSON.stringify(profile),
+    ]);
   }
 
   /**
    * Record a task completion for an agent
    */
-  async recordTaskCompletion(
-    agentId: string,
-    iterationsUsed: number
-  ): Promise<void> {
+  async recordTaskCompletion(agentId: string, iterationsUsed: number): Promise<void> {
     const profile = this.getAgentProfile(agentId);
     profile.tasksCompleted++;
     profile.totalIterations += iterationsUsed;
-    profile.avgIterationsPerTask =
-      profile.totalIterations / profile.tasksCompleted;
+    profile.avgIterationsPerTask = profile.totalIterations / profile.tasksCompleted;
     profile.lastUpdated = new Date().toISOString();
-    await this.persist();
+    this.saveAgentProfile(profile);
   }
 
   /**
@@ -215,7 +214,7 @@ class LearningStore {
     profile.mistakePatterns.sort((a, b) => b.occurrences - a.occurrences);
 
     profile.lastUpdated = now;
-    await this.persist();
+    this.saveAgentProfile(profile);
 
     // Check if this pattern should be promoted to project-level lesson
     if (pattern && pattern.occurrences >= 3) {
@@ -248,15 +247,18 @@ class LearningStore {
     avgIterations: number;
     topMistakeCategory: FeedbackCategory | null;
   }> {
-    return Object.values(this.data.agents).map((agent) => ({
-      agentId: agent.agentId,
-      tasksCompleted: agent.tasksCompleted,
-      avgIterations: agent.avgIterationsPerTask,
-      topMistakeCategory:
-        agent.mistakePatterns.length > 0
-          ? agent.mistakePatterns[0].category
-          : null,
-    }));
+    const rows = db.query<{ data: string }>("SELECT data FROM learning_agents");
+
+    return rows.map((row) => {
+      const agent = JSON.parse(row.data) as AgentLearningProfile;
+      return {
+        agentId: agent.agentId,
+        tasksCompleted: agent.tasksCompleted,
+        avgIterations: agent.avgIterationsPerTask,
+        topMistakeCategory:
+          agent.mistakePatterns.length > 0 ? agent.mistakePatterns[0].category : null,
+      };
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -276,20 +278,26 @@ class LearningStore {
     const id = `lesson-${Date.now()}`;
 
     // Check if similar lesson already exists
-    const existingIndex = this.data.project.lessonsLearned.findIndex(
-      (l) => l.category === category && l.lesson.toLowerCase() === lesson.toLowerCase()
+    const existingRows = db.query<{ id: number; data: string }>(
+      "SELECT id, data FROM learning_project WHERE type = 'lesson'"
     );
 
-    if (existingIndex >= 0) {
-      // Update existing lesson
-      const existing = this.data.project.lessonsLearned[existingIndex];
-      existing.occurrences++;
-      existing.confidence = Math.min(1, existing.confidence + 0.1);
-      existing.updatedAt = now;
-      await this.persist();
-      return existing;
+    for (const row of existingRows) {
+      const existing = JSON.parse(row.data) as ProjectLesson;
+      if (existing.category === category && existing.lesson.toLowerCase() === lesson.toLowerCase()) {
+        // Update existing lesson
+        existing.occurrences++;
+        existing.confidence = Math.min(1, existing.confidence + 0.1);
+        existing.updatedAt = now;
+        db.run("UPDATE learning_project SET data = ? WHERE id = ?", [
+          JSON.stringify(existing),
+          row.id,
+        ]);
+        return existing;
+      }
     }
 
+    // Create new lesson
     const newLesson: ProjectLesson = {
       id,
       category,
@@ -302,8 +310,11 @@ class LearningStore {
       updatedAt: now,
     };
 
-    this.data.project.lessonsLearned.push(newLesson);
-    await this.persist();
+    db.run("INSERT INTO learning_project (type, data, created_at) VALUES ('lesson', ?, ?)", [
+      JSON.stringify(newLesson),
+      now,
+    ]);
+
     return newLesson;
   }
 
@@ -311,7 +322,11 @@ class LearningStore {
    * Get relevant project lessons for a task category
    */
   getRelevantLessons(categories?: FeedbackCategory[]): ProjectLesson[] {
-    let lessons = this.data.project.lessonsLearned;
+    const rows = db.query<{ data: string }>(
+      "SELECT data FROM learning_project WHERE type = 'lesson'"
+    );
+
+    let lessons = rows.map((row) => JSON.parse(row.data) as ProjectLesson);
 
     if (categories && categories.length > 0) {
       lessons = lessons.filter((l) => categories.includes(l.category));
@@ -331,30 +346,49 @@ class LearningStore {
     description: string,
     examples: string[] = []
   ): Promise<void> {
-    const existing = this.data.project.codebaseConventions.find(
-      (c) => c.pattern === pattern
+    const now = new Date().toISOString();
+
+    // Check if convention with this pattern exists
+    const existingRows = db.query<{ id: number; data: string }>(
+      "SELECT id, data FROM learning_project WHERE type = 'convention'"
     );
 
-    if (existing) {
-      existing.description = description;
-      existing.examples = [...new Set([...existing.examples, ...examples])];
-    } else {
-      this.data.project.codebaseConventions.push({
-        pattern,
-        description,
-        examples,
-        addedAt: new Date().toISOString(),
-      });
+    for (const row of existingRows) {
+      const existing = JSON.parse(row.data) as CodebaseConvention;
+      if (existing.pattern === pattern) {
+        // Update existing
+        existing.description = description;
+        existing.examples = [...new Set([...existing.examples, ...examples])];
+        db.run("UPDATE learning_project SET data = ? WHERE id = ?", [
+          JSON.stringify(existing),
+          row.id,
+        ]);
+        return;
+      }
     }
 
-    await this.persist();
+    // Create new convention
+    const convention: CodebaseConvention = {
+      pattern,
+      description,
+      examples,
+      addedAt: now,
+    };
+
+    db.run("INSERT INTO learning_project (type, data, created_at) VALUES ('convention', ?, ?)", [
+      JSON.stringify(convention),
+      now,
+    ]);
   }
 
   /**
    * Get codebase conventions
    */
   getCodebaseConventions(): CodebaseConvention[] {
-    return this.data.project.codebaseConventions;
+    const rows = db.query<{ data: string }>(
+      "SELECT data FROM learning_project WHERE type = 'convention'"
+    );
+    return rows.map((row) => JSON.parse(row.data) as CodebaseConvention);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -383,36 +417,27 @@ class LearningStore {
     sourceTaskId: string
   ): Promise<void> {
     // Check if multiple agents have this pattern
-    const agentsWithPattern = Object.values(this.data.agents).filter((agent) =>
-      agent.mistakePatterns.some(
-        (p) => p.category === category && p.occurrences >= 2
-      )
+    const rows = db.query<{ data: string }>("SELECT data FROM learning_agents");
+    const agents = rows.map((row) => JSON.parse(row.data) as AgentLearningProfile);
+
+    const agentsWithPattern = agents.filter((agent) =>
+      agent.mistakePatterns.some((p) => p.category === category && p.occurrences >= 2)
     );
 
     if (agentsWithPattern.length >= 2) {
       // Extract a lesson from the feedback
       const lesson = this.extractLessonFromFeedback(category, feedback);
       if (lesson) {
-        await this.addProjectLesson(
-          category,
-          lesson,
-          `Auto-promoted from task ${sourceTaskId}`
-        );
+        await this.addProjectLesson(category, lesson, `Auto-promoted from task ${sourceTaskId}`);
         console.error(`[Learning] Promoted pattern to project lesson: ${lesson}`);
       }
     }
   }
 
-  private extractLessonFromFeedback(
-    category: FeedbackCategory,
-    feedback: string
-  ): string | null {
+  private extractLessonFromFeedback(category: FeedbackCategory, feedback: string): string | null {
     // Simple extraction - in a real system this could use AI
     // For now, just clean up and use the feedback as the lesson
-    const cleaned = feedback
-      .replace(/^REJECTED:\s*/i, "")
-      .replace(/\s+/g, " ")
-      .trim();
+    const cleaned = feedback.replace(/^REJECTED:\s*/i, "").replace(/\s+/g, " ").trim();
 
     if (cleaned.length > 10 && cleaned.length < 200) {
       return `${this.getCategoryDescription(category)}: ${cleaned}`;
@@ -424,7 +449,10 @@ class LearningStore {
   /**
    * Get complete learning context for an agent starting a task
    */
-  getFullContext(agentId: string, taskCategories?: FeedbackCategory[]): {
+  getFullContext(
+    agentId: string,
+    taskCategories?: FeedbackCategory[]
+  ): {
     agentMistakes: AgentMistakePattern[];
     agentRecentFeedback: AgentLearningProfile["recentFeedback"];
     projectLessons: ProjectLesson[];

@@ -361,18 +361,28 @@ function updateStats() {
   });
 
   Object.keys(columns).forEach(function(column) {
-    if (stats[column] === 0 && !columns[column].querySelector(".empty-state")) {
-      var empty = document.createElement("div");
-      empty.className = "empty-state";
-      var icon = document.createElement("div");
-      icon.className = "empty-state-icon";
-      icon.textContent = "📋";
-      var text = document.createElement("div");
-      text.className = "empty-state-text";
-      text.textContent = "No tasks";
-      empty.appendChild(icon);
-      empty.appendChild(text);
-      columns[column].appendChild(empty);
+    var existingEmpty = columns[column].querySelector(".empty-state");
+
+    if (stats[column] === 0) {
+      // Add empty state if not present
+      if (!existingEmpty) {
+        var empty = document.createElement("div");
+        empty.className = "empty-state";
+        var icon = document.createElement("div");
+        icon.className = "empty-state-icon";
+        icon.textContent = "📋";
+        var text = document.createElement("div");
+        text.className = "empty-state-text";
+        text.textContent = "No tasks";
+        empty.appendChild(icon);
+        empty.appendChild(text);
+        columns[column].appendChild(empty);
+      }
+    } else {
+      // Remove empty state if tasks exist
+      if (existingEmpty) {
+        existingEmpty.remove();
+      }
     }
   });
 }

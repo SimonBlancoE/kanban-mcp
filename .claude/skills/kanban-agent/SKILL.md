@@ -5,7 +5,7 @@ description: Kanban Agent role. USE WHEN user says /kanban-agent OR wants to wor
 
 # Kanban Agent Workflow
 
-You are now operating as an **Agent** for the Kanban board. You work on tasks assigned to you using the **Ralph Wiggum iteration pattern**.
+You are now operating as an **Agent** for the Kanban board. You work on tasks assigned to you using the **Ralph Wiggum iteration pattern** with **session tracking** for cross-context-window continuity.
 
 ## Your Agent ID
 
@@ -20,34 +20,50 @@ If no ID was provided, ask the user: "What is your agent ID? (e.g., agent-alpha,
 
 As Agent, you:
 - Can only view and modify tasks assigned to you
+- **Start sessions** to track your work across context windows
 - **Get learning context** before starting work
 - **Start iterations** to track your work
 - Complete work against **acceptance criteria**
 - **Submit iterations** with work summaries
 - Address QA feedback if rejected
+- **End sessions** with clean state for handoffs
 
-## Startup Sequence
+## Session Start (MANDATORY - Do This First)
 
-**Execute these steps immediately:**
+**Execute these steps immediately at the start of EVERY session:**
 
-1. **Get your learning context:**
+1. **Start session and get context:**
    ```
-   kanban_get_task_context with role: "agent", agentId: "<YOUR_ID>"
+   kanban_session_start with agentId: "<YOUR_ID>"
    ```
-   This gives you relevant project lessons and your past patterns.
+   This returns:
+   - `boardSummary`: Current board state
+   - `lastSession`: Previous session notes, pending items, known issues
+   - `urgentItems`: Escalated, blocked, and critical tasks
+   - `suggestedNextTask`: Recommended task to work on
+   - `learningContext`: Mistakes to avoid, project conventions
 
-2. **Check your assigned tasks:**
+2. **Review continuity from last session:**
+   - Check `lastSession.sessionNotes` for what was accomplished
+   - Check `lastSession.pendingItems` for unfinished work
+   - Check `lastSession.knownIssues` for problems to be aware of
+
+3. **Check urgent items:**
+   - If `urgentItems.escalated` is not empty: Alert user - these need human review
+   - If `urgentItems.blocked` is not empty: Note blockers to avoid
+   - If `urgentItems.critical` is not empty: Prioritize these
+
+4. **Verify board health:**
    ```
-   kanban_list_tasks with role: "agent", agentId: "<YOUR_ID>"
+   kanban_verify_board_health
    ```
+   - If `recommendation: 'proceed'` -> Continue to task selection
+   - If `recommendation: 'fix_first'` -> Address issues before new work
+   - If `recommendation: 'escalate'` -> Alert user and await guidance
 
-3. **Report to user:**
-   - Your learning context insights
-   - Number of tasks in your backlog
-   - Any tasks already in progress (check iteration count!)
-   - Any tasks with QA feedback (rejections to fix)
-
-4. **Pick next task** by priority: critical > high > medium > low
+5. **Pick next task:**
+   - Use `suggestedNextTask` from session context, OR
+   - List your tasks and pick by priority: critical > high > medium > low
 
 ## Available Tools
 
@@ -119,6 +135,31 @@ If QA rejects:
 
 **WARNING:** If you exceed `maxIterations`, the task will be escalated!
 
+## Session End (MANDATORY - Do This Before Stopping)
+
+**Before ANY session end (context window limit, user stop, task complete):**
+
+1. **Ensure no task left in "in_progress" without notes:**
+   - If mid-task, add progress notes to task description
+   - If iteration started but not submitted, submit with current progress
+
+2. **End the session:**
+   ```
+   kanban_session_end with:
+     agentId: "<YOUR_ID>"
+     sessionNotes: "What you accomplished this session"
+     pendingItems: ["What's still in progress", "What you planned to do next"]
+     knownIssues: ["Any bugs discovered", "Any blockers encountered"]
+     cleanState: true  // Only if all work is committed and tests pass
+   ```
+
+3. **Session end automatically:**
+   - Creates a git commit if `cleanState: true`
+   - Updates the session summary file
+   - Logs activity for next session's context
+
+**CRITICAL:** Always call `kanban_session_end` before stopping work!
+
 ## Learning from Your Work
 
 The system tracks:
@@ -126,8 +167,9 @@ The system tracks:
 - Common mistake patterns
 - Your strengths
 
-Use `kanban_get_task_context` at the start of each session to:
-- See relevant project lessons
+Use `kanban_session_start` at the start of each session to:
+- Get full context including learning insights
+- See previous session notes
 - Review codebase conventions
 - Learn from past rejections
 
@@ -143,9 +185,12 @@ You **cannot**: create, delete, assign tasks, or view other agents' tasks.
 
 ```
 User: "/kanban-agent agent-alpha"
--> Get learning context for agent-alpha
+-> kanban_session_start with agentId: "agent-alpha"
+-> Review session context and last session notes
+-> kanban_verify_board_health
 -> List tasks assigned to agent-alpha
 -> Report status and insights
 -> Start iteration on highest priority task
 -> Complete work and submit iteration
+-> kanban_session_end with summary
 ```

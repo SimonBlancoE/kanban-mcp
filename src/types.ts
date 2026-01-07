@@ -289,3 +289,127 @@ export type WSEvent =
   | WSSprintCreated
   | WSSprintUpdated
   | WSAgentActivity;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SESSION TYPES (Context Bridge for Long-Running Agents)
+// Based on Anthropic's "Effective harnesses for long-running agents"
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Session status
+ */
+export const SessionStatusSchema = z.enum(["active", "completed", "abandoned"]);
+export type SessionStatus = z.infer<typeof SessionStatusSchema>;
+
+/**
+ * Session - Tracks an agent's work session for context bridging
+ */
+export const SessionSchema = z.object({
+  id: z.string().uuid(),
+  agentId: z.string().min(1).max(100),
+  startedAt: z.string().datetime(),
+  endedAt: z.string().datetime().optional(),
+  status: SessionStatusSchema.default("active"),
+
+  // Context for next session
+  contextSummary: z.string().max(2000).optional().describe("What agent was working on"),
+  sessionNotes: z.string().max(2000).optional().describe("End-of-session notes"),
+  pendingItems: z.array(z.string().max(500)).default([]).describe("What's left to do"),
+  knownIssues: z.array(z.string().max(500)).default([]).describe("Problems discovered"),
+  cleanState: z.boolean().default(false).describe("Did agent leave clean state?"),
+
+  // Git integration
+  gitCommitHash: z.string().max(100).optional().describe("Auto-commit SHA if created"),
+
+  // Task tracking
+  tasksTouched: z.array(z.string().uuid()).default([]).describe("Task IDs worked on"),
+});
+
+export type Session = z.infer<typeof SessionSchema>;
+
+/**
+ * SessionContext - Data provided to agent at session start
+ */
+export interface SessionContext {
+  boardSummary: string;
+  activeSprint: Sprint | null;
+  recentActivity: Array<{
+    timestamp: string;
+    agentId: string;
+    action: string;
+    taskId?: string;
+    taskTitle?: string;
+  }>;
+  urgentItems: {
+    escalated: Task[];
+    blocked: Task[];
+    critical: Task[];
+  };
+  lastSession: {
+    id: string;
+    endedAt: string;
+    sessionNotes: string;
+    pendingItems: string[];
+    knownIssues: string[];
+  } | null;
+  suggestedNextTask: Task | null;
+  learningContext: {
+    mistakesToAvoid: string[];
+    projectConventions: string[];
+  };
+}
+
+/**
+ * SessionEndInput - Data provided by agent at session end
+ */
+export interface SessionEndInput {
+  agentId: string;
+  sessionNotes: string;
+  pendingItems?: string[];
+  knownIssues?: string[];
+  cleanState: boolean;
+  commitMessage?: string;
+}
+
+/**
+ * BoardHealthCheck - Pre-work verification result
+ */
+export interface BoardHealthVerification {
+  healthy: boolean;
+  issues: {
+    escalatedTasks: number;
+    blockedTasks: number;
+    staleInProgress: number;
+    qaBacklog: number;
+    orphanedTasks: number;
+  };
+  recommendation: "proceed" | "fix_first" | "escalate";
+  suggestedAction?: string;
+}
+
+/**
+ * FeatureStatus - Explicit pass/fail tracking for tasks (from Anthropic article)
+ */
+export const FeatureStatusSchema = z.enum(["not_started", "failing", "passing"]);
+export type FeatureStatus = z.infer<typeof FeatureStatusSchema>;
+
+/**
+ * VerificationResult - Evidence of feature verification
+ */
+export const VerificationResultSchema = z.object({
+  testedAt: z.string().datetime(),
+  method: z.enum(["manual", "automated", "e2e"]),
+  evidence: z.string().max(1000).optional().describe("Screenshot path, test output, etc."),
+});
+export type VerificationResult = z.infer<typeof VerificationResultSchema>;
+
+/**
+ * ProjectInitInput - Input for initializing a new project
+ */
+export interface ProjectInitInput {
+  projectName: string;
+  description: string;
+  features: string[];
+  techStack?: string[];
+  constraints?: string[];
+}

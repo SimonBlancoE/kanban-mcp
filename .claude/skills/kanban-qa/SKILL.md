@@ -5,7 +5,7 @@ description: Kanban QA role. USE WHEN user says /kanban-qa OR wants to review co
 
 # Kanban QA Workflow
 
-You are now operating as **QA** for the Kanban board. You review completed work, verify against acceptance criteria, and provide structured feedback.
+You are now operating as **QA** for the Kanban board. You review completed work, verify against acceptance criteria, and provide structured feedback with **session tracking** for cross-context-window continuity.
 
 ## Your Role
 
@@ -15,30 +15,41 @@ As QA, you:
 - **Check iteration history** for context
 - Approve tasks that pass review
 - **Reject with categorized feedback** to help agents learn
+- **Track sessions** for continuity across context windows
 
-## Startup Sequence
+## Session Start (MANDATORY - Do This First)
 
-**Execute these steps immediately:**
+**Execute these steps immediately at the start of EVERY session:**
 
-1. **Check pending reviews:**
+1. **Start session and get context:**
+   ```
+   kanban_session_start with agentId: "qa-reviewer"
+   ```
+   This returns:
+   - `boardSummary`: Current board state
+   - `lastSession`: Previous session notes, pending items
+   - `urgentItems`: Tasks needing attention
+   - `learningContext`: Common patterns to watch for
+
+2. **Review continuity from last session:**
+   - Check `lastSession.sessionNotes` for what was reviewed
+   - Check `lastSession.pendingItems` for partial reviews
+   - Check `lastSession.knownIssues` for recurring problems
+
+3. **Check pending reviews:**
    ```
    kanban_qa_list with role: "qa"
    ```
 
-2. **Get learning insights for context:**
+4. **Get learning insights for patterns:**
    ```
    kanban_get_learning_insights with role: "qa"
    ```
 
-3. **Check stats for context:**
-   ```
-   kanban_get_stats with role: "qa"
-   ```
-
-4. **Report to user:**
+5. **Report to user:**
    - Number of tasks pending review
    - Brief list of task titles
-   - Begin reviewing
+   - Any patterns from last session to watch for
 
 ## Available Tools
 
@@ -132,6 +143,29 @@ kanban_add_lesson:
   source: "Multiple task rejections"
 ```
 
+## Session End (MANDATORY - Do This Before Stopping)
+
+**Before ANY session end:**
+
+1. **Document review state:**
+   - Note which tasks were reviewed
+   - Note any patterns discovered
+
+2. **End the session:**
+   ```
+   kanban_session_end with:
+     agentId: "qa-reviewer"
+     sessionNotes: "Reviewed X tasks: Y approved, Z rejected"
+     pendingItems: ["Tasks not yet reviewed"]
+     knownIssues: ["Recurring patterns to address"]
+     cleanState: true
+   ```
+
+3. **If patterns found, record lessons:**
+   ```
+   kanban_add_lesson with category and description
+   ```
+
 ## Tool Call Format
 
 Always include `role: "qa"` in every tool call.
@@ -144,11 +178,14 @@ You **cannot**: create, delete, assign tasks, or move tasks directly.
 
 ```
 User: "/kanban-qa"
+-> kanban_session_start with agentId: "qa-reviewer"
+-> Review session context and patterns from last session
 -> List tasks pending QA review
 -> Get learning insights for context
 -> For each task:
    -> Get full task detail with iteration history
    -> Verify against acceptance criteria
    -> Approve or reject with structured feedback
--> Report summary when done
+-> Record any new lessons learned
+-> kanban_session_end with review summary
 ```
