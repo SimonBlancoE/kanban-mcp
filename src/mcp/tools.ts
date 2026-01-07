@@ -979,7 +979,6 @@ export function registerTools(server: McpServer): void {
           store.updateTask(task.id, {
             column: "done",
             pendingQa: false,
-            qaApprovedAt: new Date().toISOString(),
             qaFeedback: `Bulk completed: ${reason}`,
           });
           updated.push(task.title);
@@ -1100,9 +1099,18 @@ export function registerTools(server: McpServer): void {
         return errorResponse("Task is not assigned to you");
       }
 
-      const entry = store.recordIterationSubmission(taskId, notes, filesChanged);
+      // Auto-start iteration if not already started (makes workflow more forgiving)
+      let entry = store.recordIterationSubmission(taskId, notes, filesChanged);
       if (!entry) {
-        return errorResponse("Failed to record submission - no active iteration found");
+        // No active iteration - auto-start one and then submit
+        const startEntry = store.startIteration(taskId, agentId);
+        if (!startEntry) {
+          return errorResponse("Failed to start iteration for submission");
+        }
+        entry = store.recordIterationSubmission(taskId, notes, filesChanged);
+        if (!entry) {
+          return errorResponse("Failed to record submission after auto-starting iteration");
+        }
       }
 
       // Move to done with pendingQa

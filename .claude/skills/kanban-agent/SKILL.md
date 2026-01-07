@@ -54,9 +54,11 @@ As Agent, you:
 - `kanban_list_tasks` - View tasks assigned to you
 - `kanban_get_task` - View details of your task
 - `kanban_get_task_detail` - View task with iteration history
-- `kanban_move_task` - Change task status (backlog -> in_progress -> done)
+- `kanban_move_task` - Move task between backlog/in_progress/blocked (NOT for completing tasks!)
 - `kanban_update_task` - Update description with progress notes
 - `kanban_get_stats` - View board summary
+
+**IMPORTANT:** To complete a task, you MUST use `kanban_submit_iteration`, not `kanban_move_task`!
 
 ### Iteration Tools (Ralph Wiggum Pattern)
 - `kanban_start_iteration` - **Start an iteration before beginning work**
@@ -102,8 +104,8 @@ kanban_submit_iteration:
   role: "agent"
   agentId: "<YOUR_ID>"
   taskId: "<TASK_ID>"
-  workSummary: "Implemented login form with validation. Tests pass."
-  selfAssessment: "All acceptance criteria met. Form validates inputs, shows errors, and handles submission."
+  notes: "Implemented login form with validation. Tests pass. All acceptance criteria met."
+  filesChanged: ["src/components/LoginForm.tsx", "src/components/LoginForm.test.tsx"]
 ```
 
 This automatically moves the task to `done` for QA review.
