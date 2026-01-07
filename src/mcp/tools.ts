@@ -921,6 +921,26 @@ export function registerTools(server: McpServer): void {
         }
       }
 
+      // Validate completion - all tasks must be done and QA approved
+      if (status === "complete") {
+        const tasks = sprint.taskIds.map(id => store.getTask(id)).filter(Boolean) as Task[];
+        const incompleteTasks = tasks.filter(t => t.column !== "done" || t.pendingQa);
+
+        if (incompleteTasks.length > 0) {
+          const summary = incompleteTasks.map(t => ({
+            id: t.id,
+            title: t.title,
+            column: t.column,
+            pendingQa: t.pendingQa,
+          }));
+          return errorResponse(
+            `Cannot complete sprint: ${incompleteTasks.length} task(s) not finished.\n` +
+            `Tasks must be in 'done' column with QA approved.\n` +
+            `Incomplete tasks:\n${JSON.stringify(summary, null, 2)}`
+          );
+        }
+      }
+
       sprint.status = status;
       store.updateSprint(sprintId, sprint);
       await store.persist();
@@ -930,6 +950,52 @@ export function registerTools(server: McpServer): void {
       return successResponse({
         message: `Sprint status updated: ${previousStatus} -> ${status}`,
         sprint,
+      });
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // KANBAN_SPRINT_BULK_COMPLETE - Bulk complete sprint tasks (recovery tool)
+  // ═══════════════════════════════════════════════════════════════════════════
+  server.tool(
+    "kanban_sprint_bulk_complete",
+    "Bulk move all sprint tasks to done with QA approved (Architect only). Use for recovery when tasks were worked but not tracked properly.",
+    {
+      role: z.literal("architect").describe("Must be 'architect'"),
+      sprintId: z.string().uuid().describe("Sprint ID"),
+      reason: z.string().min(10).describe("Reason for bulk completion (min 10 chars)"),
+    },
+    async ({ sprintId, reason }) => {
+      const sprint = store.getSprint(sprintId);
+      if (!sprint) {
+        return errorResponse(`Sprint not found: ${sprintId}`);
+      }
+
+      const tasks = sprint.taskIds.map(id => store.getTask(id)).filter(Boolean) as Task[];
+      const updated: string[] = [];
+
+      for (const task of tasks) {
+        if (task.column !== "done" || task.pendingQa) {
+          store.updateTask(task.id, {
+            column: "done",
+            pendingQa: false,
+            qaApprovedAt: new Date().toISOString(),
+            qaFeedback: `Bulk completed: ${reason}`,
+          });
+          updated.push(task.title);
+
+          broadcaster.broadcast("task_updated", store.getTask(task.id));
+        }
+      }
+
+      await store.persist();
+
+      broadcaster.broadcast("board_update", store.getBoard());
+
+      return successResponse({
+        message: `Bulk completed ${updated.length} tasks`,
+        reason,
+        tasksCompleted: updated,
       });
     }
   );
