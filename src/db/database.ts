@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, readdirSync } from "fs";
 import { mkdirSync } from "fs";
 import { join, dirname } from "path";
 
@@ -8,6 +8,10 @@ const __dirname = dirname(import.meta.path);
 const DATA_DIR = join(__dirname, "..", "..", "data");
 const DB_PATH = join(DATA_DIR, "kanban.db");
 const SCHEMA_PATH = join(__dirname, "schema.sql");
+const MIGRATIONS_DIR = join(__dirname, "migrations");
+
+// Current schema version (increment when adding migrations)
+const CURRENT_SCHEMA_VERSION = 2;
 
 /**
  * DatabaseConnection - SQLite connection manager for Claude Kanban MCP
@@ -68,6 +72,9 @@ class DatabaseConnection {
       if (!tableNames.includes("tasks") || !tableNames.includes("sessions")) {
         console.error("[Database] Schema incomplete, reinitializing...");
         this.runSchema();
+      } else {
+        // Run any pending migrations
+        this.runMigrations();
       }
     }
 
@@ -85,6 +92,55 @@ class DatabaseConnection {
     // Run multi-statement SQL using Bun's run method
     this.db.run(schema);
     console.error("[Database] Schema created successfully");
+  }
+
+  /**
+   * Run pending migrations to upgrade schema
+   */
+  private runMigrations(): void {
+    if (!this.db) throw new Error("Database not initialized");
+
+    const currentVersion = this.getSchemaVersion();
+    if (currentVersion >= CURRENT_SCHEMA_VERSION) {
+      return; // Already up to date
+    }
+
+    console.error(`[Database] Schema version ${currentVersion} -> ${CURRENT_SCHEMA_VERSION}, running migrations...`);
+
+    // Check if migrations directory exists
+    if (!existsSync(MIGRATIONS_DIR)) {
+      console.error("[Database] No migrations directory found");
+      return;
+    }
+
+    // Get all migration files sorted by version number
+    const migrationFiles = readdirSync(MIGRATIONS_DIR)
+      .filter(f => f.endsWith('.sql'))
+      .sort();
+
+    for (const file of migrationFiles) {
+      // Extract version number from filename (e.g., "002-agent-issues.sql" -> 2)
+      const match = file.match(/^(\d+)/);
+      if (!match) continue;
+
+      const migrationVersion = parseInt(match[1], 10);
+      if (migrationVersion <= currentVersion) continue;
+      if (migrationVersion > CURRENT_SCHEMA_VERSION) continue;
+
+      console.error(`[Database] Running migration: ${file}`);
+      const migrationPath = join(MIGRATIONS_DIR, file);
+      const migrationSql = readFileSync(migrationPath, "utf-8");
+
+      try {
+        this.db.run(migrationSql);
+        console.error(`[Database] Migration ${file} completed`);
+      } catch (error) {
+        console.error(`[Database] Migration ${file} failed:`, error);
+        throw error;
+      }
+    }
+
+    console.error(`[Database] Migrations complete, now at version ${CURRENT_SCHEMA_VERSION}`);
   }
 
   /**

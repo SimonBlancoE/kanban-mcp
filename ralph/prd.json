@@ -1,0 +1,324 @@
+[
+  {
+    "category": "functional",
+    "description": "Preview Changelog action visible when multiple versions exist",
+    "steps": [
+      "Select a repo with multiple versions",
+      "Click the Actions dropdown",
+      "Verify 'Preview Changelog' action is visible in the Version section"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Preview Changelog action hidden when only one version exists",
+    "steps": [
+      "Select a repo with only one version",
+      "Click the Actions dropdown",
+      "Verify 'Preview Changelog' action is not visible"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Clicking Preview Changelog navigates to preview page",
+    "steps": [
+      "Select a repo with multiple versions",
+      "Click the Actions dropdown",
+      "Click 'Preview Changelog'",
+      "Verify URL changes to changelog preview page",
+      "Verify changelog content is displayed"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Changelog organized by section hierarchy",
+    "steps": [
+      "Navigate to changelog preview page",
+      "Verify version number is top-level heading",
+      "Verify each section appears as subheading under version",
+      "Verify 'New Lessons' listed within each section",
+      "Verify 'Renamed' listed within each section",
+      "Verify 'Deleted' listed within each section"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Changelog shows deleted items",
+    "steps": [
+      "Delete a lesson or section between versions",
+      "Navigate to changelog preview page",
+      "Verify deleted items appear under 'Deleted' section"
+    ],
+    "passes": true
+  },
+  {
+    "category": "ui",
+    "description": "Changelog items use code font with numbered format",
+    "steps": [
+      "Navigate to changelog preview page",
+      "Verify lesson/section names displayed in code/monospace font",
+      "Verify format follows pattern like '01.03-choosing-your-model'",
+      "Verify section numbers and lesson numbers are zero-padded (e.g., 01, 02)"
+    ],
+    "passes": true
+  },
+  {
+    "category": "ui",
+    "description": "Changelog renders as formatted HTML not raw markdown",
+    "steps": [
+      "Navigate to changelog preview page",
+      "Verify headings are styled as HTML headings",
+      "Verify Tailwind Typograph is installed, via Tailwind v4 config file",
+      "Verify bullet points are rendered as list items",
+      "Verify no raw markdown syntax visible (e.g., no '###' or '-' prefixes)"
+    ],
+    "passes": true
+  },
+  {
+    "category": "ui",
+    "description": "Preview page has back navigation to main interface",
+    "steps": [
+      "Navigate to changelog preview page",
+      "Verify back button or link is visible",
+      "Click back navigation",
+      "Verify return to main interface with repo selected"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Changelog refreshes when page is brought into focus",
+    "steps": [
+      "Navigate to changelog preview page",
+      "Switch to another browser tab or window",
+      "Make a change that affects changelog (e.g., rename a lesson)",
+      "Switch back to changelog preview tab",
+      "Verify changelog content updates to reflect the change"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Focus refresh uses shared hook with main page",
+    "steps": [
+      "Verify custom hook exists for focus-based revalidation",
+      "Verify main page uses the shared hook",
+      "Verify changelog preview page uses the same shared hook",
+      "Confirm both pages refresh on focus using identical logic"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Rewrite repo path action available in Actions dropdown",
+    "steps": [
+      "Select a repo",
+      "Click the Actions dropdown",
+      "Verify 'Rewrite Repo Path' action is visible"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Rewrite repo path opens dialog with current path",
+    "steps": [
+      "Click 'Rewrite Repo Path' action",
+      "Verify dialog opens with text input",
+      "Verify current repo path is pre-filled in input"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Submitting new path updates repo in database",
+    "steps": [
+      "Open rewrite repo path dialog",
+      "Enter new valid path",
+      "Click submit/save",
+      "Verify repo path updates in UI",
+      "Verify database reflects new path"
+    ],
+    "passes": true
+  },
+  {
+    "category": "validation",
+    "description": "Invalid path shows error message",
+    "steps": [
+      "Open rewrite repo path dialog",
+      "Enter path that doesn't exist on filesystem",
+      "Click submit/save",
+      "Verify error message is displayed",
+      "Verify repo path remains unchanged"
+    ],
+    "passes": true
+  },
+  {
+    "category": "validation",
+    "description": "Repo update fails if multiple repos share same path",
+    "steps": [
+      "Have multiple repos with identical paths in database",
+      "Attempt to update repo via api.repos.update",
+      "Verify error is thrown indicating ambiguous update",
+      "Verify no repos are modified"
+    ],
+    "passes": true
+  },
+  {
+    "category": "ui",
+    "description": "Sidebar has exactly three main items: Repos, Videos, Diagram Playground",
+    "steps": [
+      "Load the application",
+      "Verify sidebar shows 'Repos' item",
+      "Verify sidebar shows 'Videos' item",
+      "Verify sidebar shows 'Diagram Playground' item",
+      "Verify no other main navigation items exist"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Repos sidebar item expands to show repo list with add button",
+    "steps": [
+      "Click on 'Repos' in sidebar",
+      "Verify list of repos appears",
+      "Verify plus/add button is visible next to Repos heading",
+      "Click plus button",
+      "Verify add repo dialog/flow opens"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Videos sidebar item expands to show video list with add button",
+    "steps": [
+      "Click on 'Videos' in sidebar",
+      "Verify list of videos appears",
+      "Verify plus/add button is visible next to Videos heading",
+      "Click plus button",
+      "Verify add video dialog/flow opens"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Home page shows most recent three unattached videos",
+    "steps": [
+      "Navigate to home page",
+      "Verify section showing recent unattached videos",
+      "Verify maximum of three videos displayed",
+      "Verify only videos without lessonId are shown",
+      "Verify videos ordered by most recent first"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Home page allows selecting a repository",
+    "steps": [
+      "Navigate to home page",
+      "Verify repo selection UI is visible",
+      "Click on a repo",
+      "Verify repo is selected and details shown"
+    ],
+    "passes": true
+  },
+  {
+    "category": "ui",
+    "description": "Delete video shows confirmation dialog before deleting",
+    "steps": [
+      "Navigate to a video",
+      "Click delete button",
+      "Verify 'Are you sure?' confirmation dialog appears",
+      "Click cancel",
+      "Verify video is not deleted",
+      "Click delete again and confirm",
+      "Verify video is deleted"
+    ],
+    "passes": true
+  },
+  {
+    "category": "ui",
+    "description": "Prerecording checklist shows voice level indicator with colored dots",
+    "steps": [
+      "Navigate to video editor prerecording checklist",
+      "Verify microphone volume indicator shows 8 dots",
+      "Verify all 8 dots visible in light grey when inactive",
+      "Speak into microphone at low volume",
+      "Verify first 3 dots light up green",
+      "Speak at medium volume",
+      "Verify 4th dot lights up orange",
+      "Speak at high volume",
+      "Verify dots 5-8 light up red"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Press B while clip is selected to add a beat/pause",
+    "steps": [
+      "Navigate to video editor",
+      "Select a clip using arrow keys",
+      "Press 'B' key",
+      "Verify beat/pause is added to the clip",
+      "Verify pause indicator displays on the clip itself"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Beat adds 0.4s to clip duration during playback",
+    "steps": [
+      "Navigate to video editor with clips containing beats",
+      "Play back the clips",
+      "Verify clips with beats pause for 0.4s (BEAT_DURATION from constants.ts)",
+      "Verify beat duration is added to total clip playback time"
+    ],
+    "passes": true
+  },
+  {
+    "category": "ui",
+    "description": "Beats display as three orange ellipsis dots below clip",
+    "steps": [
+      "Add a beat to a clip",
+      "Verify three orange dots appear below the clip",
+      "Verify dots are orange colored",
+      "Verify dots form an ellipsis pattern"
+    ],
+    "passes": true
+  },
+  {
+    "category": "ui",
+    "description": "Beat dots create visual gap between clips",
+    "steps": [
+      "Add a beat to a clip that has a following clip",
+      "Verify dots create slight visual gap between clip and next clip",
+      "Verify gap indicates the pause duration"
+    ],
+    "passes": true
+  },
+  {
+    "category": "ui",
+    "description": "Beat dots appear before insertion point when both present",
+    "steps": [
+      "Add a beat to a clip",
+      "Position insertion point below the same clip",
+      "Verify order from top: clip, beat dots, insertion point"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Beats display on both optimistic and database clips",
+    "steps": [
+      "Add a new clip (optimistically added)",
+      "Add a beat to the optimistic clip",
+      "Verify beat dots display",
+      "Wait for clip to sync to database",
+      "Verify beat dots still display on database clip"
+    ],
+    "passes": true
+  }
+]
