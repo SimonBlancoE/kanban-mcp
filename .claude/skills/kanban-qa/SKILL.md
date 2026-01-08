@@ -84,6 +84,67 @@ Check each verification step:
 - Does the implementation satisfy the criteria?
 - If a test command exists, was it run?
 
+### 2.5. Visual Verification (MANDATORY for Frontend Tasks)
+
+**For ANY task involving UI, frontend, or web changes, you MUST perform visual verification.**
+
+This is NON-NEGOTIABLE. Agents claiming "it works" without visual proof should be rejected.
+
+#### Browser CLI Commands
+
+```bash
+# Screenshot the implemented feature
+bun run $PAI_DIR/skills/Browser/Tools/Browse.ts screenshot http://localhost:3000/page /tmp/qa-review.png
+
+# Verify critical elements exist
+bun run $PAI_DIR/skills/Browser/Tools/Browse.ts verify http://localhost:3000/page ".expected-element"
+bun run $PAI_DIR/skills/Browser/Tools/Browse.ts verify http://localhost:3000/page "[data-testid='feature']"
+
+# Open in browser for interactive testing (when needed)
+bun run $PAI_DIR/skills/Browser/Tools/Browse.ts open http://localhost:3000/page
+```
+
+Then view the screenshot:
+```
+Read /tmp/qa-review.png
+```
+
+#### QA Visual Verification Checklist
+
+| Check | What to Look For |
+|-------|------------------|
+| **Renders** | Component appears without blank space or loading spinner stuck |
+| **Layout** | Matches design requirements, no overflow or misalignment |
+| **Content** | Text, images, data displayed correctly |
+| **Interactive** | Buttons, links, forms are visible and appear clickable |
+| **Responsive** | If required, test at different viewport sizes |
+| **Errors** | No error boundaries triggered, no "undefined" text |
+| **Console** | No JavaScript errors (use `open` command to check manually) |
+
+#### Multi-Viewport Testing (When Required)
+
+```bash
+# Desktop
+bun run $PAI_DIR/skills/Browser/Tools/Browse.ts screenshot http://localhost:3000/page /tmp/desktop.png
+
+# For mobile, you may need to use the TypeScript API or verify manually
+bun run $PAI_DIR/skills/Browser/Tools/Browse.ts open http://localhost:3000/page
+```
+
+#### What Triggers Visual Rejection
+
+Reject with `category: "ui"` if:
+- Component doesn't render at all
+- Layout is broken or significantly misaligned
+- Required elements are missing from the DOM
+- Obvious visual regressions from before
+
+Reject with `category: "missing-feature"` if:
+- Visual elements described in acceptance criteria are absent
+- Agent claims completion but screenshot shows incomplete work
+
+**CRITICAL:** If the agent did NOT include visual verification in their submission notes, this is itself grounds for rejection. They should have used Step 4.5 in their workflow.
+
 ### 3. Review Iteration History
 
 If this is iteration 2+:
@@ -123,6 +184,8 @@ Use these categories to help agents learn:
 | `security` | Security vulnerabilities |
 | `performance` | Performance issues |
 | `missing-feature` | Required functionality not implemented |
+| `ui` | Visual issues: broken layout, missing elements, render failures |
+| `no-verification` | Agent submitted without visual verification (frontend tasks) |
 
 ## Severity Levels
 

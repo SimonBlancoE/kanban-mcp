@@ -49,6 +49,8 @@ export const FeedbackCategorySchema = z.enum([
   "security",
   "performance",
   "missing-feature",
+  "ui",
+  "no-verification",
   "other"
 ]);
 export type FeedbackCategory = z.infer<typeof FeedbackCategorySchema>;

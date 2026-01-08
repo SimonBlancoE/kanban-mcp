@@ -403,6 +403,8 @@ class LearningStore {
       security: "Security vulnerabilities or unsafe practices",
       performance: "Performance issues or inefficiencies",
       "missing-feature": "Incomplete implementation of requirements",
+      ui: "Visual issues: broken layout, missing elements, render failures",
+      "no-verification": "Agent submitted without visual verification for frontend tasks",
       other: "Other issues",
     };
     return descriptions[category];

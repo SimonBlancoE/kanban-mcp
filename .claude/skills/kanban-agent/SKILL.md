@@ -114,6 +114,44 @@ Before submitting, verify against acceptance criteria:
 - Run the test command if specified
 - Check each verification step
 
+### Step 4.5: Visual Verification (Frontend Tasks)
+
+**For ANY task involving UI, frontend, or web pages, you MUST visually verify your work.**
+
+Use the `/Browser` skill via CLI:
+
+```bash
+# Take screenshot of your changes
+bun run $PAI_DIR/skills/Browser/Tools/Browse.ts screenshot http://localhost:3000/your-page /tmp/verify.png
+
+# Verify specific elements exist
+bun run $PAI_DIR/skills/Browser/Tools/Browse.ts verify http://localhost:3000/your-page ".your-selector"
+```
+
+Then view the screenshot:
+```
+Read /tmp/verify.png
+```
+
+**Visual verification checklist:**
+- [ ] Component renders without errors
+- [ ] Layout matches requirements
+- [ ] Interactive elements are visible and accessible
+- [ ] No console errors (check browser dev tools if needed)
+- [ ] Responsive behavior if required
+
+**If you haven't LOOKED at the rendered output, your self-verification is incomplete.**
+
+Log your visual verification:
+```
+kanban_log_activity:
+  role: "agent"
+  agentId: "<YOUR_ID>"
+  taskId: "<TASK_ID>"
+  action: "Visual verification completed"
+  details: "Screenshot taken, verified: [list elements verified]"
+```
+
 ### Step 5: Submit the Iteration
 ```
 kanban_submit_iteration:

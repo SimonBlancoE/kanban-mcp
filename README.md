@@ -79,6 +79,24 @@ Tier 3: Project Memory → "Always validate at API boundaries"
 
 New agents inherit project lessons. Your codebase conventions get documented automatically.
 
+### Visual Verification (Browser Integration)
+
+Frontend tasks get real verification, not just "trust me, it works":
+
+```bash
+# Agent takes screenshot of their implementation
+bun run $PAI_DIR/skills/Browser/Tools/Browse.ts screenshot http://localhost:3000/feature /tmp/verify.png
+
+# QA verifies the actual rendered output
+bun run $PAI_DIR/skills/Browser/Tools/Browse.ts verify http://localhost:3000/feature ".expected-element"
+```
+
+- Agents must visually verify before submitting frontend work
+- QA rejects with `category: "ui"` or `category: "no-verification"` if visual proof is missing
+- Screenshots are reviewed, not just code
+
+Requires the [PAI Browser Skill](https://github.com/danielmiessler/Personal_AI_Infrastructure/tree/main/Packs/pai-browser-skill) for visual verification capabilities.
+
 ### Real-Time Dashboard
 
 ![Kanban Board](https://localhost:3456)
@@ -109,6 +127,7 @@ Agents can't see each other's tasks. Architects see everything. QA only sees wor
 | **Acceptance Criteria** | No more "is this done?" - clear success conditions |
 | **Max Iterations** | Prevents infinite loops - escalates stuck tasks |
 | **Structured QA Feedback** | Not "rejected" but "logic error, high severity, try X" |
+| **Visual Verification** | Agents and QA verify frontend work with real screenshots |
 | **Capability Matching** | Register agent skills, auto-assign by issue labels |
 | **Issue Sync** | Import from Forgejo/GitHub, close when done |
 | **Session Continuity** | Agents resume where they left off across context windows |
