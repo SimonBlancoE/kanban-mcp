@@ -5,6 +5,8 @@ import { store } from "../store";
 import { broadcaster } from "../web/broadcast";
 import { learningStore } from "../learning";
 import { sessionStore } from "../sessions";
+import { agentStore } from "../agents";
+import { issueStore } from "../issues";
 import {
   ColumnSchema,
   RoleSchema,
@@ -13,10 +15,15 @@ import {
   FeedbackSeveritySchema,
   AcceptanceCriteriaSchema,
   SprintStatusSchema,
+  IssueProviderSchema,
   type Column,
   type Task,
   type Sprint,
   type AcceptanceCriteria,
+  type ExternalIssue,
+  type IssueImportResult,
+  type IssueSyncAction,
+  type IssueSyncResult,
 } from "../types";
 
 /**
@@ -1658,6 +1665,453 @@ export function registerTools(server: McpServer): void {
         tasks: tasks.map(t => ({ id: t.id, title: t.title, priority: t.priority })),
         conventions: techStack ? [`Tech Stack: ${techStack.join(", ")}`] : [],
         constraints: constraints || [],
+      });
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // AGENT CAPABILITY MANAGEMENT
+  // Register and manage agent skills for capability-based task assignment
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "kanban_agent_register",
+    "Register an agent with skills and capabilities for automatic task assignment (Architect only).",
+    {
+      role: z.literal("architect"),
+      agentId: z.string().min(1).max(100).describe("Unique agent identifier"),
+      skills: z.array(z.string().max(50)).describe("Technical skills: react, typescript, python, testing, api"),
+      specializations: z.array(z.string().max(100)).optional().describe("Broader categories: frontend, backend, qa, devops"),
+      maxConcurrentTasks: z.number().int().min(1).max(10).optional().default(3),
+    },
+    async ({ agentId, skills, specializations, maxConcurrentTasks }) => {
+      const capability = agentStore.registerAgent(
+        agentId,
+        skills,
+        specializations ?? [],
+        maxConcurrentTasks
+      );
+
+      return successResponse({
+        message: `Agent "${agentId}" registered successfully`,
+        agent: capability,
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_agent_list",
+    "List all registered agents and their capabilities.",
+    {
+      role: RoleSchema,
+      activeOnly: z.boolean().optional().default(true).describe("Only show active agents"),
+      includeWorkload: z.boolean().optional().default(true).describe("Include current task count"),
+    },
+    async ({ activeOnly, includeWorkload }) => {
+      if (includeWorkload) {
+        const agents = agentStore.getAgentsWithWorkload(activeOnly);
+        return successResponse({
+          agents: agents.map(a => ({
+            agentId: a.agentId,
+            skills: a.skills,
+            specializations: a.specializations,
+            maxConcurrentTasks: a.maxConcurrentTasks,
+            currentWorkload: a.currentWorkload,
+            availableSlots: a.maxConcurrentTasks - a.currentWorkload,
+            isActive: a.isActive,
+          })),
+          count: agents.length,
+        });
+      }
+
+      const agents = agentStore.listAgents(activeOnly);
+      return successResponse({
+        agents: agents.map(a => ({
+          agentId: a.agentId,
+          skills: a.skills,
+          specializations: a.specializations,
+          maxConcurrentTasks: a.maxConcurrentTasks,
+          isActive: a.isActive,
+        })),
+        count: agents.length,
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_agent_update",
+    "Update an agent's skills or capabilities (Architect only).",
+    {
+      role: z.literal("architect"),
+      agentId: z.string().min(1).max(100),
+      skills: z.array(z.string().max(50)).optional().describe("New skill list (replaces existing)"),
+      specializations: z.array(z.string().max(100)).optional().describe("New specializations (replaces existing)"),
+      maxConcurrentTasks: z.number().int().min(1).max(10).optional(),
+      isActive: z.boolean().optional().describe("Set to false to deactivate agent"),
+    },
+    async ({ agentId, skills, specializations, maxConcurrentTasks, isActive }) => {
+      const updates: any = {};
+      if (skills !== undefined) updates.skills = skills;
+      if (specializations !== undefined) updates.specializations = specializations;
+      if (maxConcurrentTasks !== undefined) updates.maxConcurrentTasks = maxConcurrentTasks;
+      if (isActive !== undefined) updates.isActive = isActive;
+
+      const updated = agentStore.updateAgent(agentId, updates);
+      if (!updated) {
+        return errorResponse(`Agent "${agentId}" not found`);
+      }
+
+      return successResponse({
+        message: `Agent "${agentId}" updated successfully`,
+        agent: updated,
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_agent_match",
+    "Find the best agent match for given requirements based on skills and workload.",
+    {
+      role: z.literal("architect"),
+      labels: z.array(z.string()).optional().describe("Issue labels to match against agent skills"),
+      keywords: z.array(z.string()).optional().describe("Keywords to match"),
+      title: z.string().optional().describe("Issue/task title for keyword extraction"),
+      topN: z.number().int().min(1).max(10).optional().default(3).describe("Number of matches to return"),
+    },
+    async ({ labels, keywords, title, topN }) => {
+      const matches = agentStore.findBestMatch({ labels, keywords, title });
+      const topMatches = matches.slice(0, topN);
+
+      if (topMatches.length === 0) {
+        return successResponse({
+          message: "No matching agents found. Consider registering agents with relevant skills.",
+          matches: [],
+          suggestion: "Use kanban_agent_register to add agents with skills matching your task requirements.",
+        });
+      }
+
+      return successResponse({
+        matches: topMatches,
+        bestMatch: topMatches[0],
+        recommendation: `Assign to "${topMatches[0].agentId}" (score: ${topMatches[0].score}, reason: ${topMatches[0].reason})`,
+      });
+    }
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ISSUE IMPORT & SYNC
+  // Import issues from external trackers and sync completion status
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  server.tool(
+    "kanban_import_issues",
+    "Import issues from an external tracker as kanban tasks. Creates a sprint containing all imported issues. NOTE: This tool prepares the import - you must separately call your Forgejo/GitHub MCP to list issues and pass them here.",
+    {
+      role: z.literal("architect"),
+      provider: IssueProviderSchema.optional().default("forgejo"),
+      repo: z.string().describe("Repository in 'owner/repo' format"),
+      issues: z.array(z.object({
+        id: z.number().int(),
+        number: z.number().int(),
+        title: z.string(),
+        body: z.string().optional().default(""),
+        state: z.enum(["open", "closed"]).optional().default("open"),
+        labels: z.array(z.string()).optional().default([]),
+        url: z.string().url(),
+      })).describe("Issues to import (from Forgejo MCP list_issues call)"),
+      sprintGoal: z.string().optional().describe("Custom sprint goal"),
+      skipExisting: z.boolean().optional().default(true),
+      autoAssign: z.boolean().optional().default(true).describe("Auto-assign based on labels/agent skills"),
+      defaultPriority: PrioritySchema.optional().default("medium"),
+    },
+    async ({ provider, repo, issues, sprintGoal, skipExisting, autoAssign, defaultPriority }) => {
+      const result: IssueImportResult = {
+        sprintId: "",
+        sprintGoal: sprintGoal ?? `Import from ${repo}`,
+        importedCount: 0,
+        skippedCount: 0,
+        tasks: [],
+        skipped: [],
+      };
+
+      // Filter out already-imported issues if skipExisting
+      const issuesToImport = skipExisting
+        ? issues.filter(issue => !issueStore.isImported(provider, repo, issue.number))
+        : issues;
+
+      const skippedIssues = issues.filter(issue =>
+        skipExisting && issueStore.isImported(provider, repo, issue.number)
+      );
+
+      for (const issue of skippedIssues) {
+        result.skipped.push({
+          issueId: issue.number,
+          reason: "already imported",
+        });
+      }
+      result.skippedCount = skippedIssues.length;
+
+      if (issuesToImport.length === 0) {
+        return successResponse({
+          message: "No new issues to import",
+          ...result,
+        });
+      }
+
+      // Create sprint for this import
+      const sprintId = randomUUID();
+      const now = new Date().toISOString();
+      const sprint: Sprint = {
+        id: sprintId,
+        goal: result.sprintGoal,
+        description: `Imported ${issuesToImport.length} issues from ${provider}:${repo}`,
+        successCriteria: {
+          description: "All imported issues resolved",
+          verificationSteps: issuesToImport.map(i => `Issue #${i.number}: ${i.title}`),
+        },
+        status: "planning",
+        currentIteration: 1,
+        maxIterations: 5,
+        taskIds: [],
+        iterationHistory: [{
+          iteration: 1,
+          startedAt: now,
+          tasksCompleted: 0,
+          tasksRejected: 0,
+          lessonsLearned: [],
+        }],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      result.sprintId = sprintId;
+
+      // Create tasks for each issue
+      const tasks: Task[] = [];
+      for (const issue of issuesToImport) {
+        const taskId = randomUUID();
+
+        // Find best agent match if autoAssign
+        let suggestedAgent: string | null = null;
+        let matchReason: string | null = null;
+
+        if (autoAssign) {
+          const match = agentStore.findBestAgent({
+            labels: issue.labels,
+            title: issue.title,
+          });
+          if (match) {
+            suggestedAgent = match.agentId;
+            matchReason = match.reason;
+          }
+        }
+
+        // Build issue source metadata
+        const issueSource = issueStore.buildIssueSource(
+          provider,
+          issue.number,
+          issue.url,
+          repo,
+          issue.labels ?? [],
+          issue.title
+        );
+
+        // Create task
+        const task: Task = {
+          id: taskId,
+          title: `#${issue.number}: ${issue.title}`,
+          description: issue.body ?? "",
+          priority: defaultPriority,
+          dependsOn: [],
+          blocks: [],
+          assignee: suggestedAgent,
+          column: "backlog",
+          pendingQa: false,
+          qaFeedback: null,
+          iteration: 1,
+          maxIterations: 3,
+          iterationLog: [],
+          sprintId,
+          issueSource,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        store.addTask(task);
+        tasks.push(task);
+
+        // Record import
+        issueStore.recordImport(provider, repo, issue.number, taskId, sprintId);
+
+        result.tasks.push({
+          taskId,
+          issueId: issue.number,
+          issueUrl: issue.url,
+          title: issue.title,
+          suggestedAgent,
+          matchReason,
+        });
+      }
+
+      // Update sprint with task IDs
+      sprint.taskIds = tasks.map(t => t.id);
+      store.addSprint(sprint);
+
+      result.importedCount = tasks.length;
+
+      // Broadcast updates
+      broadcaster.broadcast("sprint_created", sprint);
+      for (const task of tasks) {
+        broadcaster.broadcast("task_created", task);
+      }
+
+      return successResponse({
+        message: `Imported ${result.importedCount} issues from ${repo}`,
+        ...result,
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_get_issue_source",
+    "Get the source issue information for a task.",
+    {
+      role: RoleSchema,
+      taskId: z.string().uuid(),
+    },
+    async ({ taskId }) => {
+      const task = store.getTask(taskId);
+      if (!task) {
+        return errorResponse(`Task ${taskId} not found`);
+      }
+
+      if (!task.issueSource) {
+        return successResponse({
+          message: "Task has no linked issue",
+          hasIssueSource: false,
+        });
+      }
+
+      const importRecord = issueStore.getImportByTask(taskId);
+
+      return successResponse({
+        hasIssueSource: true,
+        issueSource: task.issueSource,
+        syncStatus: {
+          isSynced: importRecord?.syncedAt !== null,
+          syncedAt: importRecord?.syncedAt,
+        },
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_sync_issue",
+    "Sync a completed task back to its source issue. Posts a comment and/or closes the issue. NOTE: This prepares the sync data - you must call your Forgejo/GitHub MCP to actually post the comment/close.",
+    {
+      role: z.enum(["architect", "qa"]),
+      taskId: z.string().uuid(),
+      action: z.enum(["comment", "close", "comment_and_close"]).optional().default("comment_and_close"),
+      customComment: z.string().max(2000).optional().describe("Override auto-generated comment"),
+    },
+    async ({ taskId, action, customComment }) => {
+      const task = store.getTask(taskId);
+      if (!task) {
+        return errorResponse(`Task ${taskId} not found`);
+      }
+
+      if (!task.issueSource) {
+        return errorResponse("Task has no linked issue source");
+      }
+
+      if (task.column !== "done" || task.pendingQa) {
+        return errorResponse("Task must be completed (done and QA approved) before syncing");
+      }
+
+      // Build sync data
+      const comment = customComment ?? issueStore.buildSyncComment(task);
+
+      const syncResult: IssueSyncResult = {
+        taskId,
+        issueId: task.issueSource.issueId,
+        issueUrl: task.issueSource.issueUrl,
+        action: action as IssueSyncAction,
+        success: false, // Will be updated by caller after MCP call
+        message: "Ready for sync",
+      };
+
+      return successResponse({
+        message: "Sync data prepared. Use your Forgejo/GitHub MCP to complete the sync.",
+        syncResult,
+        issueSource: task.issueSource,
+        comment,
+        instructions: {
+          comment: action !== "close" ? `Post this comment to issue #${task.issueSource.issueId}` : null,
+          close: action !== "comment" ? `Close issue #${task.issueSource.issueId}` : null,
+          markSynced: `After successful sync, call kanban_mark_issue_synced with taskId: "${taskId}"`,
+        },
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_mark_issue_synced",
+    "Mark a task as synced back to its source issue (call after successful Forgejo/GitHub MCP sync).",
+    {
+      role: z.enum(["architect", "qa"]),
+      taskId: z.string().uuid(),
+    },
+    async ({ taskId }) => {
+      const success = issueStore.markSynced(taskId);
+      if (!success) {
+        return errorResponse(`No import record found for task ${taskId}`);
+      }
+
+      return successResponse({
+        message: `Task ${taskId} marked as synced`,
+        syncedAt: new Date().toISOString(),
+      });
+    }
+  );
+
+  server.tool(
+    "kanban_list_unsynced",
+    "List completed tasks that have source issues but haven't been synced back.",
+    {
+      role: z.enum(["architect", "qa"]),
+      sprintId: z.string().uuid().optional().describe("Filter by sprint"),
+    },
+    async ({ sprintId }) => {
+      let unsynced = issueStore.getUnsyncedCompletedTasks();
+
+      if (sprintId) {
+        const sprintImports = issueStore.getImportsBySprint(sprintId);
+        const sprintTaskIds = new Set(sprintImports.map(i => i.taskId));
+        unsynced = unsynced.filter(u => sprintTaskIds.has(u.taskId));
+      }
+
+      if (unsynced.length === 0) {
+        return successResponse({
+          message: "All completed tasks with issues are synced",
+          unsynced: [],
+          count: 0,
+        });
+      }
+
+      // Get task details for each unsynced
+      const unsyncedWithDetails = unsynced.map(u => {
+        const task = store.getTask(u.taskId);
+        return {
+          ...u,
+          taskTitle: task?.title ?? "Unknown",
+          completedAt: task?.updatedAt,
+        };
+      });
+
+      return successResponse({
+        message: `${unsynced.length} completed task(s) pending sync`,
+        unsynced: unsyncedWithDetails,
+        count: unsynced.length,
       });
     }
   );

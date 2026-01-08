@@ -8,6 +8,39 @@ export type Column = z.infer<typeof ColumnSchema>;
 export const PrioritySchema = z.enum(["low", "medium", "high", "critical"]);
 export type Priority = z.infer<typeof PrioritySchema>;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// AGENT CAPABILITIES (for skill-based task assignment)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const AgentCapabilitySchema = z.object({
+  agentId: z.string().min(1).max(100),
+  skills: z.array(z.string().max(50)).default([]).describe("Technical skills: react, typescript, python, testing"),
+  specializations: z.array(z.string().max(100)).default([]).describe("Broader categories: frontend, backend, qa, devops"),
+  maxConcurrentTasks: z.number().int().min(1).max(10).default(3),
+  isActive: z.boolean().default(true),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type AgentCapability = z.infer<typeof AgentCapabilitySchema>;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ISSUE SOURCE (for task-issue linking with external trackers)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const IssueProviderSchema = z.enum(["forgejo", "github", "gitlab", "gitea"]);
+export type IssueProvider = z.infer<typeof IssueProviderSchema>;
+
+export const IssueSourceSchema = z.object({
+  provider: IssueProviderSchema.default("forgejo"),
+  issueId: z.number().int().describe("Original issue number"),
+  issueUrl: z.string().url().describe("Direct link to issue"),
+  repo: z.string().describe("Repository in owner/repo format"),
+  labels: z.array(z.string()).default([]).describe("Issue labels at import time"),
+  originalTitle: z.string().describe("Original issue title"),
+  importedAt: z.string().datetime(),
+});
+export type IssueSource = z.infer<typeof IssueSourceSchema>;
+
 // Feedback category for structured QA rejections
 export const FeedbackCategorySchema = z.enum([
   "logic",
@@ -85,6 +118,9 @@ export const TaskSchema = z.object({
 
   // Sprint association
   sprintId: z.string().uuid().optional().describe("Associated sprint ID"),
+
+  // External issue tracking
+  issueSource: IssueSourceSchema.optional().describe("Source issue if imported from external tracker"),
 
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -412,4 +448,91 @@ export interface ProjectInitInput {
   features: string[];
   techStack?: string[];
   constraints?: string[];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AGENT MATCHING TYPES (for capability-based task assignment)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Requirements for matching an agent to a task
+ */
+export interface AgentMatchRequirements {
+  labels?: string[];
+  keywords?: string[];
+  title?: string;
+  priority?: Priority;
+}
+
+/**
+ * Result of agent matching algorithm
+ */
+export interface AgentMatchResult {
+  agentId: string;
+  score: number;
+  matchedSkills: string[];
+  matchedSpecializations: string[];
+  currentWorkload: number;
+  reason: string;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ISSUE IMPORT TYPES (for external issue tracker integration)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Result of importing issues from external tracker
+ */
+export interface IssueImportResult {
+  sprintId: string;
+  sprintGoal: string;
+  importedCount: number;
+  skippedCount: number;
+  tasks: Array<{
+    taskId: string;
+    issueId: number;
+    issueUrl: string;
+    title: string;
+    suggestedAgent: string | null;
+    matchReason: string | null;
+  }>;
+  skipped: Array<{
+    issueId: number;
+    reason: string;
+  }>;
+}
+
+/**
+ * External issue data (from Forgejo/GitHub/etc MCP)
+ */
+export interface ExternalIssue {
+  id: number;
+  number: number;
+  title: string;
+  body: string;
+  state: "open" | "closed";
+  labels: string[];
+  url: string;
+  assignee?: string;
+  milestone?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Issue sync action
+ */
+export type IssueSyncAction = "comment" | "close" | "comment_and_close";
+
+/**
+ * Result of syncing a task back to its source issue
+ */
+export interface IssueSyncResult {
+  taskId: string;
+  issueId: number;
+  issueUrl: string;
+  action: IssueSyncAction;
+  success: boolean;
+  message: string;
+  commentUrl?: string;
 }

@@ -104,6 +104,19 @@ As Architect, you:
 - `kanban_add_lesson` - Record a project-wide lesson
 - `kanban_add_convention` - Document a codebase convention
 
+### Agent Capabilities
+- `kanban_agent_register` - Register agent with skills for auto-assignment
+- `kanban_agent_list` - List agents and their capabilities/workload
+- `kanban_agent_update` - Update agent skills or deactivate
+- `kanban_agent_match` - Find best agent for given requirements
+
+### Issue Import & Sync
+- `kanban_import_issues` - Import issues from Forgejo/GitHub as tasks
+- `kanban_get_issue_source` - Get source issue info for a task
+- `kanban_sync_issue` - Prepare sync data for completed task
+- `kanban_mark_issue_synced` - Mark task as synced to source issue
+- `kanban_list_unsynced` - List completed tasks pending sync
+
 ## Creating Tasks with Acceptance Criteria
 
 **CRITICAL:** Always define clear acceptance criteria when creating tasks.
@@ -169,6 +182,108 @@ kanban_add_lesson:
   category: "architecture"
   lesson: "Always validate input at API boundaries, not in business logic"
   source: "sprint-auth-001"
+```
+
+## Forgejo/GitHub Integration
+
+Import issues from external trackers and sync completion status back.
+
+### Prerequisites
+- Forgejo MCP (or GitHub MCP) must be configured in your Claude MCP settings
+- Agent capabilities should be registered for auto-assignment
+
+### Register Agents with Capabilities
+
+Before importing issues, register agents with skills for auto-assignment:
+
+```
+kanban_agent_register:
+  role: "architect"
+  agentId: "frontend-specialist"
+  skills: ["react", "typescript", "css", "tailwind"]
+  specializations: ["frontend", "ui"]
+  maxConcurrentTasks: 3
+```
+
+```
+kanban_agent_register:
+  role: "architect"
+  agentId: "backend-engineer"
+  skills: ["node", "typescript", "sql", "api", "rest"]
+  specializations: ["backend", "database"]
+  maxConcurrentTasks: 2
+```
+
+### List Registered Agents
+
+```
+kanban_agent_list:
+  role: "architect"
+  includeWorkload: true
+```
+
+### Import Issues from Forgejo
+
+1. First, call your Forgejo MCP to list issues:
+   ```
+   forgejo_list_issues:
+     repo: "myorg/myproject"
+     state: "open"
+     labels: ["ready", "approved"]
+   ```
+
+2. Then import them into the kanban board:
+   ```
+   kanban_import_issues:
+     role: "architect"
+     provider: "forgejo"
+     repo: "myorg/myproject"
+     issues: [... issues from step 1 ...]
+     sprintGoal: "Sprint 23: Authentication Features"
+     autoAssign: true
+   ```
+
+This creates:
+- A new sprint containing all imported issues
+- Tasks with `issueSource` metadata linking back to the original issue
+- Auto-assigned agents based on issue labels matching agent skills
+
+### Find Best Agent for a Task
+
+```
+kanban_agent_match:
+  role: "architect"
+  labels: ["frontend", "react"]
+  title: "Implement user profile page"
+```
+
+### Sync Completed Tasks Back to Issues
+
+When a task is QA-approved:
+
+1. Get sync data:
+   ```
+   kanban_sync_issue:
+     role: "architect"
+     taskId: "[uuid]"
+     action: "comment_and_close"
+   ```
+
+2. Use Forgejo MCP to post the comment and close the issue
+
+3. Mark as synced:
+   ```
+   kanban_mark_issue_synced:
+     role: "architect"
+     taskId: "[uuid]"
+   ```
+
+### List Unsynced Completed Tasks
+
+```
+kanban_list_unsynced:
+  role: "architect"
+  sprintId: "[optional sprint uuid]"
 ```
 
 ## Session End (MANDATORY - Do This Before Stopping)
